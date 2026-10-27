@@ -338,3 +338,21 @@ def test_migrations_preserve_data_on_reopen(db, make_product, cart_line, setting
     assert again.schema_version() == 1
     again.close()
     db.reopen()
+
+
+def test_sale_uses_current_product_details_but_quoted_price(db, settings, make_product, cart_line):
+    """A held/stale cart line is refreshed from the database when saved (except the quoted price)."""
+    settings.set_many({"gst_enabled": "1", "shop_state": "Tamil Nadu", "prices_include_tax": "1"})
+    p = make_product()
+    ln = cart_line("1000001")
+    ln.gst_mode, ln.gst_rate_bp, ln.product_name, ln.unit_cost = "EXEMPT", 0, "OLD NAME", 1
+    pin = ProductInput(p["name"], p["category_id"], p["price_paise"], cost=60000, mrp=p["mrp_paise"],
+                       gst_mode="FIXED", gst_rate_bp=1200,
+                       variants=[VariantInput(id=v["id"], size=v["size"], colour=v["colour"], sku=v["sku"],
+                                              barcode=v["barcode"]) for v in p["variants"]])
+    catalog.save_product(db, pin, p["id"])
+    sale = sales.get_sale(db, sell(db, settings, [ln]))
+    item = sale["items"][0]
+    assert item["product_name"] == "Classic Cotton Shirt" and item["unit_cost_paise"] == 60000
+    assert item["gst_rate_bp"] == 1200 and sale["cgst_paise"] > 0
+    assert item["unit_price_paise"] == 99900

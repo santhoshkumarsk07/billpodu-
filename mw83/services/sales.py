@@ -6,6 +6,7 @@ the transaction has committed, so a printer failure can never duplicate a sale.
 """
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from collections import defaultdict
@@ -106,20 +107,31 @@ def complete_sale(db: Database, settings: Settings, req: SaleRequest) -> int:
     existing = db.scalar("SELECT id FROM sales WHERE client_ref = ?", (req.client_ref,))
     if existing:
         return int(existing)
-    totals = compute_for(settings, req.lines, req.bill_discount, req.inter_state)
+    compute_for(settings, req.lines, req.bill_discount, req.inter_state)  # fail fast before locking
 
     with db.transaction():
         existing = db.scalar("SELECT id FROM sales WHERE client_ref = ?", (req.client_ref,))
         if existing:
             return int(existing)
 
-        # Re-check every item against the database inside the transaction.
+        # Re-read every item inside the transaction. The bill keeps the price, quantity and discounts shown
+        # on screen; product details, cost and GST settings come from the database as they are now.
+        lines = [copy.copy(ln) for ln in req.lines]
+        current = {}
+        for ln in lines:
+            v = current.get(ln.variant_id) or get_variant(db, ln.variant_id)
+            current[ln.variant_id] = v
+            ln.product_name, ln.size, ln.colour = v["product_name"], v["size"], v["colour"]
+            ln.sku, ln.barcode, ln.hsn_code = v["sku"], v["barcode"], v["hsn_code"]
+            ln.category_name, ln.unit_cost, ln.mrp = v["category_name"] or "", v["cost"], v["mrp"]
+            ln.gst_mode, ln.gst_rate_bp = v["gst_mode"], v["gst_rate_bp"]
+        totals = compute_for(settings, lines, req.bill_discount, req.inter_state)
         needed: dict[int, int] = defaultdict(int)
-        for ln in req.lines:
+        for ln in lines:
             needed[ln.variant_id] += ln.qty
         problems = []
         for vid, qty in needed.items():
-            v = get_variant(db, vid)
+            v = current[vid]
             if not v["variant_active"] or not v["product_active"]:
                 raise ValidationError(f"{v['product_name']} has been archived and cannot be sold.")
             if v["stock"] < qty:
@@ -168,7 +180,7 @@ def complete_sale(db: Database, settings: Settings, req: SaleRequest) -> int:
              (req.customer_state or "").strip()[:60]),
         ).lastrowid
 
-        for no, (ln, r) in enumerate(zip(req.lines, totals.lines, strict=True), start=1):
+        for no, (ln, r) in enumerate(zip(lines, totals.lines, strict=True), start=1):
             db.execute(
                 "INSERT INTO sale_items(sale_id, line_no, variant_id, product_name, size, colour, sku, barcode,"
                 " hsn_code, category_name, qty, unit_price_paise, mrp_paise, unit_cost_paise, item_discount_type,"
