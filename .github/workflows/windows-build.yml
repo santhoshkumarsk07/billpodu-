@@ -26,7 +26,7 @@ jobs:
 
       - name: Lint and security checks
         run: |
-          ruff check --select F,E9,B,S --ignore S101,S311,B008,S608 mw83 tests main.py
+          ruff check --select F,E9,B,S --per-file-ignores "tests/*:S101" mw83 tests main.py
           bandit -q -r mw83 main.py
           pip-audit -r requirements.txt
 
