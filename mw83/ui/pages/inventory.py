@@ -120,8 +120,8 @@ class InventoryPage(QWidget):
         self.status.currentIndexChanged.connect(lambda _: self.reload())
         self.category.currentIndexChanged.connect(lambda _: self.reload())
         sl.addLayout(hrow(self.search, self.status, QLabel("Category"), self.category, stretch=False))
-        self.table = make_table(["Product", "Size", "Colour", "SKU", "Barcode", "Stock", "Low at", "Cost", "Price",
-                                 "Stock value (cost)"])
+        self.table = make_table(["Item no.", "Product", "Size", "Colour", "SKU", "Barcode", "Stock", "Low at", "Cost",
+                                 "Price", "Stock value (cost)"], stretch_col=1)
         sl.addWidget(self.table, 1)
         sl.addLayout(hrow(button("Receive stock…", self.receive, primary=True),
                           button("Damaged / lost / adjust…", self.adjust),
@@ -164,9 +164,9 @@ class InventoryPage(QWidget):
         dm = self.ctx.settings.get_int("default_min_stock")
         rows = inventory.stock_list(self.ctx.db, self.search.text(), self.category.currentData(),
                                     self.status.currentData(), dm)
-        fill_table(self.table, [[r["name"], r["size"], r["colour"], r["sku"], r["barcode"], r["stock"],
-                                 r["min_stock"], r["cost"], r["price"], r["stock"] * r["cost"]] for r in rows],
-                   money_cols={7, 8, 9}, ids=[r["variant_id"] for r in rows])
+        fill_table(self.table, [[r["variant_id"], r["name"], r["size"], r["colour"], r["sku"], r["barcode"],
+                                 r["stock"], r["min_stock"], r["cost"], r["price"], r["stock"] * r["cost"]] for r in rows],
+                   money_cols={8, 9, 10}, ids=[r["variant_id"] for r in rows])
         val = inventory.stock_value(self.ctx.db)
         low = inventory.low_stock_count(self.ctx.db, dm)
         self.value_lbl.setText(f"<b>{val['units']}</b> pieces in stock · value at cost <b>Rs. {fmt(val['cost_value'])}"

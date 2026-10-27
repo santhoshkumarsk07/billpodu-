@@ -16,8 +16,8 @@ from ..common import (AppContext, button, confirm, fill_table, hint_label, hrow,
 
 GST_CHOICES = [("Use default rate from Settings", "DEFAULT"), ("Fixed rate for this product", "FIXED"),
                ("Clothing slab (rate depends on price)", "SLAB"), ("No GST (exempt)", "EXEMPT")]
-VAR_COLS = ["Size", "Colour", "SKU", "Barcode", "Price (blank = product)", "MRP (blank = product)",
-            "Cost (blank = product)", "Opening stock", "Current stock", "Active"]
+VAR_COLS = ["Size", "Colour", "SKU", "Barcode", "Price *", "MRP *", "Cost *", "Opening stock", "In stock",
+            "Active"]
 
 
 class ProductDialog(QDialog):
@@ -79,10 +79,17 @@ class ProductDialog(QDialog):
         lay.addLayout(top)
 
         lay.addWidget(QLabel("<b>Sizes / colours</b> — each row has its own SKU, barcode and stock. "
-                             "Leave SKU or barcode empty to create one automatically."))
+                             "Leave SKU or barcode empty to create one automatically. "
+                             "* leave blank to use the product's price."))
         self.vt = QTableWidget(0, len(VAR_COLS))
         self.vt.setHorizontalHeaderLabels(VAR_COLS)
-        self.vt.horizontalHeader().setStretchLastSection(True)
+        from PySide6.QtWidgets import QHeaderView
+
+        hh = self.vt.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for col, width in enumerate((70, 110, 130, 150, 85, 85, 85, 115, 75, 60)):
+            self.vt.setColumnWidth(col, width)
+        hh.setStretchLastSection(True)
         self.vt.verticalHeader().setVisible(False)
         lay.addWidget(self.vt, 1)
         lay.addLayout(hrow(button("Add row", lambda: self.add_row()), button("Add sizes…", self.add_sizes),

@@ -8,7 +8,8 @@ root = Path(SPECPATH).parent  # noqa: F821  (SPECPATH is provided by PyInstaller
 a = Analysis(  # noqa: F821
     [str(root / "main.py")],
     pathex=[str(root)],
-    datas=[(str(root / "assets" / "app.ico"), "assets")],
+    datas=[(str(root / "assets" / "app.ico"), "assets"), (str(root / "assets" / "app.png"), "assets"),
+           (str(root / "assets" / "arrow-down.png"), "assets"), (str(root / "assets" / "arrow-up.png"), "assets")],
     hiddenimports=["win32print", "win32api", "pywintypes"],
     excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.Qt3DCore",
               "PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtMultimedia", "PySide6.QtCharts",

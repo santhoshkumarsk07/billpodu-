@@ -9,7 +9,7 @@ Built with Python 3.11+, PySide6 (Qt), SQLite, python-barcode, reportlab and Pil
 
 | Screen | What you can do |
 |---|---|
-| **Billing / POS** (opens first) | Scan barcodes (scanner works like a keyboard), search by name, change quantity, item and bill discounts (% or Rs.), walk-in or saved customer, cash / UPI / card / split payment with change due, exchange credit, hold & resume bills, cancel the current bill, save & print, reprint |
+| **Billing / POS** (opens first) | Scan barcodes (scanner works like a keyboard), or type an item number, SKU or product name in the same box, change quantity, item and bill discounts (type 10 = 10% off, never above 100%), walk-in or saved customer, cash / UPI / card / split payment with change due, exchange credit, hold & resume bills, cancel the current bill, save & print, reprint |
 | **Dashboard** | Today's sales, bills, items, cash/UPI/card collected, discounts, refunds, low-stock count, stock value |
 | **Products** | Products with size/colour variants (each with own SKU, barcode, stock and optional price), MRP, cost, GST option, HSN, picture, archive, CSV import/export with row-level errors |
 | **Categories** | Add, rename, delete (only when unused) — men's wear categories are pre-filled |
@@ -62,6 +62,11 @@ CGST/SGST, IGST, clothing slab), stock reduction and restoration, invoice number
 returns and exchanges, backup and restore (including malicious zip files), CSV import/export, reports, printer
 failure without duplicate sales, scannability of printed barcodes, and the real UI driven by a simulated scanner.
 See [docs/TESTING_AND_SECURITY.md](docs/TESTING_AND_SECURITY.md).
+
+## App icon
+
+The 83 MEN'S WEAR icon (`assets/app.ico`, used for the program, desktop shortcut, taskbar and installer) is drawn
+by `python packaging/icon/make_icon.py`.
 
 ## Build the Windows program and installer
 

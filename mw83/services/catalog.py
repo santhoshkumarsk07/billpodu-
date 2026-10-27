@@ -15,6 +15,7 @@ from .inventory import record_movement
 CODE_RE = re.compile(r"^[A-Za-z0-9._/+-]{1,32}$")
 GST_MODES = ("DEFAULT", "FIXED", "SLAB", "EXEMPT")
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
+ITEM_NO_MAX_DIGITS = 6  # short numbers typed at the till are item numbers; real barcodes are longer
 
 
 # ----------------------------------------------------------------- categories
@@ -346,6 +347,26 @@ def variant_by_code(db: Database, code: str) -> dict | None:
     return dict(row) if row else None
 
 
+def narrow_by_words(matches: list[dict], text: str) -> list[dict]:
+    """From several search hits keep those where every typed word is a whole word of the item,
+    e.g. 'cotton shirt l black' -> only size L in Black. Falls back to all hits if none fit."""
+    words = [w.lower() for w in text.split() if w]
+
+    def tokens(m: dict) -> set[str]:
+        parts = " ".join(str(m.get(k) or "") for k in ("product_name", "brand", "size", "colour", "category_name",
+                                                         "sku"))
+        return {t for t in re.split(r"[^0-9a-z]+", parts.lower()) if t}
+
+    exact = [m for m in matches if all(w in tokens(m) for w in words)]
+    return exact or matches
+
+
+def variant_by_item_no(db: Database, item_no: int) -> dict | None:
+    """The item number is the size/colour row's permanent id, shown as 'Item no.' on screens."""
+    row = db.one(VARIANT_SELECT + "WHERE v.id = ?", (int(item_no),))
+    return dict(row) if row else None
+
+
 def get_variant(db: Database, variant_id: int) -> dict:
     row = db.one(VARIANT_SELECT + "WHERE v.id = ?", (variant_id,))
     if row is None:
@@ -362,8 +383,8 @@ def search_variants(db: Database, text: str, limit: int = 100, active_only: bool
     for w in words[:5]:
         like = f"%{w}%"
         sql += ("AND (p.name LIKE ? OR p.brand LIKE ? OR v.size LIKE ? OR v.colour LIKE ? OR v.sku LIKE ? "
-                "OR v.barcode LIKE ? OR c.name LIKE ?) ")
-        params += [like] * 7
+                "OR v.barcode LIKE ? OR c.name LIKE ? OR p.sku LIKE ? OR CAST(v.id AS TEXT) = ?) ")
+        params += [like] * 8 + [w]
     sql += "ORDER BY p.name COLLATE NOCASE, v.size, v.colour LIMIT ?"
     params.append(limit)
     return [dict(r) for r in db.all(sql, tuple(params))]

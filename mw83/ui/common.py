@@ -63,6 +63,8 @@ def info(parent: QWidget | None, title: str, text: str) -> None:
 
 
 MONEY_RE = r"^\d{0,8}(\.\d{0,2})?$"
+# 0 to 100 with up to 2 decimals: a discount can never be more than 100%
+PERCENT_RE = r"^(100(\.0{0,2})?|\d{0,2}(\.\d{0,2})?)$"
 
 
 def money_edit(placeholder: str = "0.00", width: int = 0) -> QLineEdit:
@@ -77,7 +79,7 @@ def money_edit(placeholder: str = "0.00", width: int = 0) -> QLineEdit:
 
 def percent_edit() -> QLineEdit:
     e = QLineEdit()
-    e.setValidator(QRegularExpressionValidator(r"^(100(\.0{0,2})?|\d{0,2}(\.\d{0,2})?)$"))
+    e.setValidator(QRegularExpressionValidator(PERCENT_RE))
     e.setPlaceholderText("0")
     e.setAlignment(Qt.AlignmentFlag.AlignRight)
     return e
@@ -194,6 +196,7 @@ class DateRange(QWidget):
             b = QPushButton(label)
             b.clicked.connect(fn)
             lay.addWidget(b)
+        lay.addStretch(1)
 
     def today(self):
         self.start.setDate(QDate.currentDate())

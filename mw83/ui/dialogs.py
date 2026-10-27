@@ -21,8 +21,9 @@ class VariantSearchDialog(QDialog):
         self.setWindowTitle(title)
         self.resize(900, 520)
         self.search = QLineEdit(text)
-        self.search.setPlaceholderText("Type name, brand, size, colour, SKU or barcode…")
-        self.table = make_table(["Product", "Size", "Colour", "SKU", "Barcode", "Price", "Stock"])
+        self.search.setPlaceholderText("Type name, brand, size, colour, item no., SKU or barcode…")
+        self.table = make_table(["Item no.", "Product", "Size", "Colour", "SKU", "Barcode", "Price", "Stock"],
+                                stretch_col=1)
         if multi:
             self.table.setSelectionMode(self.table.SelectionMode.ExtendedSelection)
         self.timer = QTimer(self, singleShot=True, interval=150, timeout=self.reload)
@@ -47,8 +48,9 @@ class VariantSearchDialog(QDialog):
 
     def reload(self):
         rows = catalog.search_variants(self.ctx.db, self.search.text(), limit=200, active_only=self.active_only)
-        fill_table(self.table, [[r["product_name"], r["size"], r["colour"], r["sku"], r["barcode"], r["price"],
-                                 r["stock"]] for r in rows], money_cols={5}, ids=[r["variant_id"] for r in rows])
+        fill_table(self.table, [[r["variant_id"], r["product_name"], r["size"], r["colour"], r["sku"], r["barcode"],
+                                 r["price"], r["stock"]] for r in rows], money_cols={6},
+                   ids=[r["variant_id"] for r in rows])
         if rows:
             self.table.selectRow(0)
 
@@ -124,6 +126,7 @@ class DiscountDialog(QDialog):
         self.kind.addItems(["Percentage (%)", "Amount (Rs.)", "No discount"])
         self.value = QLineEdit()
         self.value.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.kind.currentIndexChanged.connect(self._kind_changed)
         if current_type == "PERCENT":
             self.kind.setCurrentIndex(0)
             self.value.setText(fmt_percent(current_value))
@@ -138,9 +141,19 @@ class DiscountDialog(QDialog):
         box.accepted.connect(self._ok)
         box.rejected.connect(self.reject)
         form.addRow(box)
+        self._kind_changed()
         self.value.setFocus()
         self.value.selectAll()
         self.type, self.result_value = "NONE", 0
+
+    def _kind_changed(self):
+        from PySide6.QtGui import QRegularExpressionValidator
+
+        from .common import MONEY_RE, PERCENT_RE
+
+        self.value.setValidator(QRegularExpressionValidator(PERCENT_RE if self.kind.currentIndex() == 0 else MONEY_RE))
+        if self.value.text() and not self.value.hasAcceptableInput():
+            self.value.clear()
 
     def _ok(self):
         try:

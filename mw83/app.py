@@ -62,8 +62,21 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtCore import QLockFile
     from PySide6.QtWidgets import QApplication, QMessageBox
 
+    if sys.platform == "win32":
+        # Own taskbar identity so Windows shows the 83 MEN'S WEAR icon instead of Python's.
+        import ctypes
+
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("83MensWear.POS")
+        except (AttributeError, OSError):
+            pass
     app = QApplication(argv)
     app.setApplicationName(APP_NAME)
+    from PySide6.QtGui import QIcon
+
+    icon_file = paths.resource_path("assets/app.ico")
+    if icon_file.exists():
+        app.setWindowIcon(QIcon(str(icon_file)))
     from .ui.style import STYLE
 
     app.setStyleSheet(STYLE)

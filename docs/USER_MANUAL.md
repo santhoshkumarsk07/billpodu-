@@ -11,18 +11,26 @@ to come back to Billing.
 
 1. **Scan** each tag. The item is added; scanning the same size/colour again adds 1 to its quantity.
    The scan box stays ready for the next scan — no clicking needed.
-2. Press **F9** and type the cash received (or leave it empty for exact cash).
-3. Press **F12**. The bill is saved and the receipt prints (if automatic printing is on).
-4. The "Bill saved" window shows the **change to give**. Press **Enter** to print, or **Esc** for the next bill.
+   No barcode? Type into the same box and press **Enter**:
+   * the **item no.** (shown in the *Item no.* column of Inventory and Search, e.g. `25`),
+   * the **SKU** or style code (e.g. `MW000012`),
+   * or the **product name** — e.g. `cotton shirt l black`. If one item matches it is added; if several match,
+     a list opens so you can pick the size/colour with ↑/↓ and Enter.
+2. To give a bill discount, press **F5** and type the number: **10 means 10% off** the whole bill (from 0 to 100).
+   Change "% off" to "Rs. off" for a rupee amount. The box turns red and the bill cannot be completed if the
+   discount is not allowed (more than 100%, more than the bill, or above the limit in Settings).
+3. Press **F9** and type the cash received (or leave it empty for exact cash).
+4. Press **F12**. The bill is saved and the receipt prints (if automatic printing is on).
+5. The "Bill saved" window shows the **change to give**. Press **Enter** to print, or **Esc** for the next bill.
 
 ### Keys
 
 | Key | Action |
 |---|---|
 | F2 | Go to the scan box |
-| F3 | Search a product by name / brand / size / colour / SKU |
+| F3 | Search a product by name / brand / size / colour / item no. / SKU |
 | F4 | Choose or add a customer |
-| F5 | Bill discount |
+| F5 | Bill discount box (type 10 = 10% off) |
 | F6 | Discount on the selected item |
 | F7 | Hold this bill |
 | F8 | Resume a held bill |
@@ -38,7 +46,7 @@ to come back to Billing.
 
 A red bar under the scan box tells you about problems without stopping you:
 
-* **Unknown barcode** — no product has this barcode or SKU. Press F3 to search by name.
+* **No product found** — nothing matches the barcode, item no., SKU or name. Check the spelling or press F3.
 * **Out of stock** — stock is 0. Receive stock in Inventory first.
 * **Archived** — the product was archived; restore it in Products if you still sell it.
 * **Only N in stock** — you cannot sell more than you have.
@@ -46,7 +54,8 @@ A red bar under the scan box tells you about problems without stopping you:
 ### Discounts
 
 * **Item discount (F6)**: choose *Percentage* or *Amount*. The amount is for the whole line (all pieces).
-* **Bill discount (F5)**: applied to the bill after item discounts; you can type a reason.
+* **Bill discount (F5)**: in the *Discount & payment* box. Type `10` for 10% off (0–100 only), or switch to
+  "Rs. off" for an amount. Applied after item discounts; you can type a reason.
 * A discount can never be more than the amount, and the total discount cannot exceed the limit set in
   **Settings → Billing & GST → Maximum discount**.
 

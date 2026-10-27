@@ -32,9 +32,20 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
         side = QVBoxLayout()
         side.setSpacing(0)
+        logo_file = paths.resource_path("assets/app.png")
+        if logo_file.exists():
+            from PySide6.QtGui import QPixmap
+
+            logo = QLabel()
+            logo.setObjectName("brand")
+            logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            logo.setPixmap(QPixmap(str(logo_file)).scaled(
+                96, 96, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            side.addWidget(logo)
         brand = QLabel(ctx.settings.get("shop_name"))
         brand.setObjectName("brand")
         brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand.setWordWrap(True)
         side.addWidget(brand)
         self.nav = QListWidget()
         self.nav.setObjectName("sidebar")

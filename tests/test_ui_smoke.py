@@ -25,6 +25,7 @@ def window(app, db, settings, make_product, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
     monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(pos.SaleDoneDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(pos.VariantSearchDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
     settings.set("auto_print_receipt", "0")
     make_product()
     w = main_window.MainWindow(AppContext(db, settings))
@@ -55,7 +56,7 @@ def test_scanner_adds_and_increments_and_completes(window, db):
     assert pos.total_lbl.text() == "2,997.00"
     assert pos.scan.text() == ""
     scan(pos, "does-not-exist")
-    assert "Unknown barcode" in pos.banner.text()
+    assert "No product found" in pos.banner.text()
     assert len(pos.lines) == 2
     QTest.keyClicks(pos.cash, "3000")
     assert "3.00" in pos.change_lbl.text()
@@ -212,3 +213,79 @@ def test_default_customer_setting_and_search_dialog(window, db, settings):
     dlg.table.selectAll()
     dlg.accept_current()
     assert len(dlg.selected) == 2
+
+
+def test_add_by_item_number_style_code_and_name(window, db, monkeypatch):
+    from mw83.services import catalog
+    from mw83.ui.pages import pos as posmod
+
+    pos = window.page("Billing / POS")
+    item_no = catalog.variant_by_code(db, "1000002")["variant_id"]
+    scan(pos, str(item_no))                       # item number
+    assert [ln.size for ln in pos.lines] == ["L"]
+    scan(pos, "classic cotton shirt l")           # name that matches exactly one size
+    assert pos.lines[0].qty == 2
+    chosen = catalog.variant_by_code(db, "1000001")["variant_id"]
+
+    def pick_first(self):
+        assert self.table.rowCount() == 2         # name matching several sizes opens the chooser
+        self.selected = [chosen]
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(posmod.VariantSearchDialog, "exec", pick_first)
+    scan(pos, "cotton shirt")
+    assert sorted(ln.size for ln in pos.lines) == ["L", "M"]
+    scan(pos, "zzz no such thing")
+    assert "No product found" in pos.banner.text()
+
+
+def test_bill_discount_box_percent_and_limits(window, db, settings):
+    pos = window.page("Billing / POS")
+    scan(pos, "1000001")                          # 999.00
+    QTest.keyClicks(pos.disc_value, "10")
+    pos.apply_bill_discount()
+    assert pos.bill.type == "PERCENT" and pos.bill.value == 1000
+    assert pos.total_lbl.text() == "899.10"
+    # the box cannot even accept more than 100
+    pos.disc_value.clear()
+    QTest.keyClicks(pos.disc_value, "150")
+    assert float(pos.disc_value.text() or 0) <= 100
+    pos.disc_value.setText("100")
+    pos.apply_bill_discount()
+    assert pos.total_lbl.text() == "0.00"
+    # the owner's limit in Settings is enforced
+    settings.set("max_discount_percent_bp", "1500")
+    pos.disc_value.setText("20")
+    pos.apply_bill_discount()
+    assert pos.disc_value.property("invalid") is True
+    pos.complete()
+    assert db.scalar("SELECT COUNT(*) FROM sales") == 0  # not saved with an invalid discount
+    pos.disc_value.setText("15")
+    pos.apply_bill_discount()
+    pos.complete()
+    assert db.scalar("SELECT bill_discount_paise FROM sales") == 14985
+
+
+def test_bill_discount_amount_mode(window, db):
+    pos = window.page("Billing / POS")
+    scan(pos, "1000001")
+    pos.disc_type.setCurrentIndex(1)              # Rs. off
+    pos.disc_value.setText("99.90")
+    pos.apply_bill_discount()
+    assert pos.total_lbl.text() == "899.10"
+    pos.disc_value.setText("5000")
+    pos.apply_bill_discount()
+    assert pos.disc_value.property("invalid") is True
+    assert pos.total_lbl.text() == "899.10"       # bad value is not applied
+
+
+def test_stylesheet_and_icons_load(app):
+    from mw83.paths import resource_path
+    from mw83.ui.style import build_style
+
+    css = build_style()
+    for name in ("arrow-down.png", "arrow-up.png", "app.ico", "app.png"):
+        assert resource_path(f"assets/{name}").is_file(), name
+    assert "ARROW_" not in css and css.count("{") == css.count("}")
+    app.setStyleSheet(css)
+    app.setStyleSheet("")

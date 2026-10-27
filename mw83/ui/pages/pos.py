@@ -12,8 +12,8 @@ import uuid
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QFrame, QGridLayout,
-                               QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QGroupBox,
+                               QHBoxLayout, QInputDialog, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
 from ...errors import UserError, ValidationError
@@ -23,7 +23,7 @@ from ...services.cart import AMOUNT, NONE, PERCENT, BillDiscount, CartLine
 from ...services.settings import INDIAN_STATES
 from ..common import (AppContext, button, confirm, fill_table, hint_label, hrow, make_table, money_edit,
                       selected_id, show_error)
-from ..dialogs import CustomerPicker, DiscountDialog, VariantSearchDialog
+from ..dialogs import CustomerPicker, DiscountDialog, VariantSearchDialog  # noqa: F401
 from .. import receipt_actions
 
 log = logging.getLogger("mw83.pos")
@@ -142,7 +142,7 @@ class PosPage(QWidget):
         left = QVBoxLayout()
         self.scan = QLineEdit()
         self.scan.setObjectName("scan")
-        self.scan.setPlaceholderText("Scan barcode here (or type barcode / SKU and press Enter)   [F2]")
+        self.scan.setPlaceholderText("Scan barcode or type item no. / SKU / name  [F2]")
         self.scan.returnPressed.connect(self.on_scan)
         self.scan.installEventFilter(self)
         left.addLayout(hrow(self.scan, button("Search  [F3]", self.open_search), stretch=False))
@@ -159,16 +159,26 @@ class PosPage(QWidget):
             button("Set qty", self.set_qty), button("Item discount  [F6]", self.item_discount),
             button("Remove item  [Del]", self.remove_line), None,
             button("Cancel bill", self.clear_bill, tip="Clears this unsaved bill after asking you"), stretch=False))
-        left.addWidget(hint_label("Keys: F2 scan · F3 search · F4 customer · F5 bill discount · F6 item discount · "
+        self.note = QLineEdit()
+        self.note.setPlaceholderText("Bill note (optional) — printed on the receipt")
+        self.note.setMaxLength(300)
+        left.addWidget(self.note)
+        left.addWidget(hint_label("Cash box empty = exact cash. Split payment: type the UPI/card part, the rest is cash. "
+                                  "Keys: F2 scan · F3 search · F4 customer · F5 bill discount · F6 item discount · "
                                   "F7 hold · F8 resume · F9 payment · F12 complete · Ctrl+N new bill · "
                                   "Ctrl+P reprint last bill"))
         root.addLayout(left, 3)
 
         right = QVBoxLayout()
-        cust_box = QGroupBox("Customer")
+        right.setSpacing(6)
+        right.setContentsMargins(0, 0, 4, 0)
+
+        # customer (one compact row)
+        cust_box = QGroupBox("Customer  [F4]")
         cl = QVBoxLayout(cust_box)
+        cl.setSpacing(4)
         self.cust_label = QLabel()
-        cl.addLayout(hrow(self.cust_label, None, button("Change  [F4]", self.pick_customer), stretch=False))
+        cl.addLayout(hrow(self.cust_label, None, button("Change", self.pick_customer), stretch=False))
         self.inter_state = QCheckBox("Customer from another state (IGST)")
         self.inter_state.toggled.connect(self._inter_state_changed)
         self.cust_state = QComboBox()
@@ -179,83 +189,124 @@ class PosPage(QWidget):
         cl.addWidget(self.cust_state)
         right.addWidget(cust_box)
 
-        disc_box = QGroupBox("Bill discount  [F5]")
-        dl = QFormLayout(disc_box)
-        self.bill_disc_label = QLabel("None")
-        self.disc_reason = QLineEdit()
-        self.disc_reason.setPlaceholderText("Reason (optional)")
-        dl.addRow(self.bill_disc_label, button("Set…", self.bill_discount))
-        dl.addRow("Reason", self.disc_reason)
-        right.addWidget(disc_box)
-
-        tot_box = QGroupBox("Totals")
-        tl = QFormLayout(tot_box)
-        self.lbl = {k: QLabel("0.00") for k in ("gross", "item_disc", "bill_disc", "tax", "round", "count")}
-        for k in self.lbl.values():
-            k.setAlignment(Qt.AlignmentFlag.AlignRight)
-        tl.addRow("Items", self.lbl["count"])
-        tl.addRow("Subtotal", self.lbl["gross"])
-        tl.addRow("Item discounts", self.lbl["item_disc"])
-        tl.addRow("Bill discount", self.lbl["bill_disc"])
-        self.tax_title = QLabel("GST")
-        tl.addRow(self.tax_title, self.lbl["tax"])
-        self.round_title = QLabel("Round off")
-        tl.addRow(self.round_title, self.lbl["round"])
+        # totals
+        tot_box = QGroupBox("Bill total")
+        tl = QGridLayout(tot_box)
+        tl.setVerticalSpacing(2)
+        self.lbl = {k: QLabel("0.00") for k in ("count", "gross", "disc", "tax", "round")}
+        titles = {"count": "Items", "gross": "Subtotal", "disc": "Discount", "tax": "GST", "round": "Round off"}
+        self.lbl_title = {}
+        for row, key in enumerate(("count", "gross", "disc", "tax", "round")):
+            t = QLabel(titles[key])
+            self.lbl_title[key] = t
+            self.lbl[key].setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            tl.addWidget(t, row, 0)
+            tl.addWidget(self.lbl[key], row, 1)
+        self.tax_title = self.lbl_title["tax"]
+        self.round_title = self.lbl_title["round"]
+        payable = QLabel("PAYABLE  Rs.")
+        payable.setObjectName("payable_title")
         self.total_lbl = QLabel("0.00")
         self.total_lbl.setObjectName("total")
-        self.total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-        tl.addRow(QLabel("<b>PAYABLE</b>"), self.total_lbl)
+        self.total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tl.addWidget(payable, 5, 0)
+        tl.addWidget(self.total_lbl, 5, 1)
         right.addWidget(tot_box)
 
-        pay_box = QGroupBox("Payment  [F9]")
-        pl = QFormLayout(pay_box)
+        # payment, with the bill discount at the top
+        pay_box = QGroupBox("Discount && payment   (F5 discount · F9 payment)")
+        pl = QGridLayout(pay_box)
+        pl.setHorizontalSpacing(8)
+        pl.setVerticalSpacing(5)
+        pl.setColumnStretch(1, 1)
+        pl.setColumnStretch(2, 1)
+        self.disc_value = QLineEdit()
+        self.disc_value.setObjectName("payfield")
+        self.disc_value.setPlaceholderText("0")
+        self.disc_value.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.disc_value.setToolTip("Type 10 for 10% off the whole bill (0 to 100).")
+        self.disc_type = QComboBox()
+        self.disc_type.addItem("% off", PERCENT)
+        self.disc_type.addItem("Rs. off", AMOUNT)
+        self.disc_reason = QLineEdit()
+        self.disc_reason.setPlaceholderText("Discount reason (optional)")
+        self.disc_reason.setMaxLength(120)
+        self.disc_timer = QTimer(self, singleShot=True, interval=250, timeout=self.apply_bill_discount)
+        self.disc_value.textEdited.connect(lambda _: self.disc_timer.start())
+        self.disc_value.returnPressed.connect(self.apply_bill_discount)
+        self.disc_info = QLabel()
+        self.disc_info.setObjectName("hint")
+        self.disc_type.currentIndexChanged.connect(self._disc_type_changed)
+        pl.addWidget(QLabel("Bill discount"), 0, 0)
+        pl.addWidget(self.disc_value, 0, 1)
+        pl.addWidget(self.disc_type, 0, 2)
+        pl.addWidget(self.disc_info, 1, 0)
+        pl.addWidget(self.disc_reason, 1, 1, 1, 2)
+
         self.cash = money_edit("exact amount")
-        self.upi = money_edit()
+        self.upi = money_edit("0.00")
+        self.card = money_edit("0.00")
         self.upi_ref = QLineEdit()
-        self.upi_ref.setPlaceholderText("UPI ref (optional)")
-        self.card = money_edit()
+        self.upi_ref.setPlaceholderText("UPI ref no.")
         self.card_ref = QLineEdit()
-        self.card_ref.setPlaceholderText("Card ref (optional)")
+        self.card_ref.setPlaceholderText("Card ref no.")
+        for w in (self.cash, self.upi, self.card, self.disc_value):
+            w.setObjectName("payfield")
+        for w in (self.upi_ref, self.card_ref):
+            w.setMaxLength(60)
         self.exchange = QComboBox()
         for w in (self.cash, self.upi, self.card):
             w.textChanged.connect(lambda _: self.update_change())
             w.returnPressed.connect(self.complete)
         self.exchange.currentIndexChanged.connect(lambda _: self.update_change())
-        pl.addRow("Cash received", self.cash)
-        pl.addRow("UPI amount", hrow(self.upi, self.upi_ref, stretch=False))
-        pl.addRow("Card amount", hrow(self.card, self.card_ref, stretch=False))
-        pl.addRow("Exchange credit", self.exchange)
+        pl.addWidget(QLabel("Cash received"), 3, 0)
+        pl.addWidget(self.cash, 3, 1, 1, 2)
+        pl.addWidget(QLabel("UPI"), 4, 0)
+        pl.addWidget(self.upi, 4, 1)
+        pl.addWidget(self.upi_ref, 4, 2)
+        pl.addWidget(QLabel("Card"), 5, 0)
+        pl.addWidget(self.card, 5, 1)
+        pl.addWidget(self.card_ref, 5, 2)
+        self.exchange_lbl = QLabel("Exchange credit")
+        pl.addWidget(self.exchange_lbl, 6, 0)
+        pl.addWidget(self.exchange, 6, 1, 1, 2)
         self.change_lbl = QLabel()
         self.change_lbl.setObjectName("change")
-        pl.addRow(self.change_lbl)
-        self.note = QLineEdit()
-        self.note.setPlaceholderText("Bill note (optional)")
-        self.note.setMaxLength(300)
-        pl.addRow("Note", self.note)
+        self.change_lbl.setWordWrap(True)
+        pl.addWidget(self.change_lbl, 7, 0, 1, 3)
         right.addWidget(pay_box)
-        pay_hint = hint_label("Leave cash empty for exact cash. For split payment, enter the UPI/card part; "
-                              "the rest is cash.")
-        right.addWidget(pay_hint)
+        right.addStretch(1)
+        panel = QWidget()
+        panel.setObjectName("page")
+        panel.setLayout(right)
+        scroll = QScrollArea()
+        scroll.setWidget(panel)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+        # The complete button and bill actions are pinned below, so they are always visible.
+        side = QVBoxLayout()
+        side.setContentsMargins(0, 0, 0, 0)
+        side.addWidget(scroll, 1)
         self.complete_btn = QPushButton("COMPLETE BILL  [F12]")
         self.complete_btn.setObjectName("big")
         self.complete_btn.clicked.connect(self.complete)
-        right.addWidget(self.complete_btn)
+        side.addWidget(self.complete_btn)
         actions = QGridLayout()
         actions.addWidget(button("Hold bill  [F7]", self.hold), 0, 0)
         actions.addWidget(button("Resume held  [F8]", self.resume), 0, 1)
         actions.addWidget(button("New bill  [Ctrl+N]", self.new_bill), 1, 0)
         actions.addWidget(button("Reprint last  [Ctrl+P]", self.reprint_last), 1, 1)
-        right.addLayout(actions)
-        right.addStretch(1)
-        panel = QFrame()
-        panel.setLayout(right)
-        panel.setFixedWidth(430)
-        root.addWidget(panel)
+        side.addLayout(actions)
+        side_widget = QWidget()
+        side_widget.setLayout(side)
+        side_widget.setFixedWidth(450)
+        root.addWidget(side_widget)
 
     def _shortcuts(self):
         keys = {
-            "F2": self.focus_scan, "F3": self.open_search, "F4": self.pick_customer, "F5": self.bill_discount,
+            "F2": self.focus_scan, "F3": self.open_search, "F4": self.pick_customer, "F5": self.focus_discount,
             "F6": self.item_discount, "F7": self.hold, "F8": self.resume, "F9": self.focus_payment,
             "F12": self.complete, "Ctrl+Return": self.complete, "Ctrl+Enter": self.complete,
             "Ctrl+N": self.new_bill, "Ctrl+P": self.reprint_last,
@@ -361,20 +412,40 @@ class PosPage(QWidget):
             self.table.selectRow(len(self.lines) - 1)
 
     def on_scan(self):
-        code = self.scan.text().strip()
+        """Barcode or SKU first, then item number, then product name / style code."""
+        text = self.scan.text().strip()
         self.scan.clear()
-        if not code:
+        if not text:
+            return
+        if len(text) > 80:
+            self.flash("That text is too long for a barcode or product name.")
             return
         try:
-            v = catalog.variant_by_code(self.ctx.db, code)
+            v = catalog.variant_by_code(self.ctx.db, text)
+            if v is None and text.isdigit() and len(text) <= catalog.ITEM_NO_MAX_DIGITS:
+                v = catalog.variant_by_item_no(self.ctx.db, int(text))
+            if v is None:
+                matches = catalog.search_variants(self.ctx.db, text, limit=50)
         except Exception as exc:  # noqa: BLE001
-            show_error(self, exc, "looking up the barcode")
+            show_error(self, exc, "looking up the item")
             return
-        if v is None:
-            self.flash(f"Unknown barcode '{code}'. Not found as a barcode or SKU. Press F3 to search by name.")
-            return
-        self.add_variant(v, code)
+        if v is None and len(matches) > 1:
+            matches = catalog.narrow_by_words(matches, text)
+        if v is not None:
+            self.add_variant(v, text)
+        elif len(matches) == 1:
+            self.add_variant(matches[0], text)
+        elif matches:
+            self._choose(text)
+        else:
+            self.flash(f"No product found for '{text}'. Check the barcode, item no., SKU or name "
+                       "(press F3 to search).")
         self.focus_scan()
+
+    def _choose(self, text: str):
+        dlg = VariantSearchDialog(self.ctx, self, text, title=f"Choose item for '{text}'")
+        if dlg.exec() and dlg.selected:
+            self.add_variant(catalog.get_variant(self.ctx.db, dlg.selected[0]))
 
     def open_search(self):
         dlg = VariantSearchDialog(self.ctx, self, self.scan.text().strip())
@@ -443,17 +514,57 @@ class PosPage(QWidget):
             self.table.selectRow(i)
         self.focus_scan()
 
-    def bill_discount(self):
-        if not self.lines:
-            self.flash("Add items before giving a bill discount.")
+    def focus_discount(self):
+        self.disc_value.setFocus()
+        self.disc_value.selectAll()
+
+    def _disc_type_changed(self):
+        from PySide6.QtGui import QRegularExpressionValidator
+
+        from ..common import MONEY_RE, PERCENT_RE
+
+        pct = self.disc_type.currentData() == PERCENT
+        self.disc_value.setValidator(QRegularExpressionValidator(PERCENT_RE if pct else MONEY_RE))
+        self.disc_value.setToolTip("Type 10 for 10% off the whole bill (0 to 100)." if pct
+                                   else "Rupees off the whole bill.")
+        if self.disc_value.text() and not self.disc_value.hasAcceptableInput():
+            self.disc_value.clear()  # e.g. 250 typed as rupees is not a valid percentage
+        self.apply_bill_discount()
+
+    def _set_disc_error(self, error: bool):
+        self.disc_value.setProperty("invalid", error)
+        self.disc_value.style().unpolish(self.disc_value)
+        self.disc_value.style().polish(self.disc_value)
+
+    def apply_bill_discount(self):
+        """Apply what is typed in the discount box: 10 with '% off' = 10% off the whole bill."""
+        from ...money import parse_percent, parse_rupees
+
+        text = self.disc_value.text().strip()
+        kind = self.disc_type.currentData()
+        try:
+            if text in ("", ".") or float(text) == 0:
+                new = BillDiscount()
+            elif kind == PERCENT:
+                new = BillDiscount(PERCENT, parse_percent(text, "Discount %"))
+            else:
+                new = BillDiscount(AMOUNT, parse_rupees(text, "Discount amount"))
+        except (UserError, ValueError) as exc:
+            self._set_disc_error(True)
+            self.disc_info.setText("not applied")
+            self.flash(getattr(exc, "message", "Enter a number for the discount."))
             return
-        base = self.totals.gross - self.totals.item_discount if self.totals else 0
-        dlg = DiscountDialog("Bill discount", base, self.bill.type, self.bill.value, self)
-        if dlg.exec():
-            def change():
-                self.bill.type, self.bill.value = dlg.type, dlg.result_value
-            self._apply(change)
-        self.focus_scan()
+        if new.type != NONE and not self.lines:
+            self._set_disc_error(True)
+            self.disc_info.setText("add items first")
+            return
+
+        def change():
+            self.bill.type, self.bill.value = new.type, new.value
+        ok = self._apply(change)
+        self._set_disc_error(not ok)
+        if not ok:
+            self.disc_info.setText("not applied")
 
     def on_double_click(self, index):
         if index.column() == 3:
@@ -476,8 +587,13 @@ class PosPage(QWidget):
         self.bill = BillDiscount()
         self.customer_id = self._default_customer()
         self.client_ref = uuid.uuid4().hex
-        for w in (self.cash, self.upi, self.upi_ref, self.card, self.card_ref, self.note, self.disc_reason):
+        for w in (self.cash, self.upi, self.upi_ref, self.card, self.card_ref, self.note, self.disc_reason,
+                  self.disc_value):
             w.clear()
+        self.disc_type.blockSignals(True)
+        self.disc_type.setCurrentIndex(0)
+        self.disc_type.blockSignals(False)
+        self._disc_type_changed()
         self.inter_state.setChecked(False)
         self.cust_state.setCurrentIndex(0)
         self._load_exchange_credits()
@@ -517,6 +633,9 @@ class PosPage(QWidget):
             self.exchange.addItem(f"{r['return_no']} (bill {r['invoice_no']}) — Rs. {fmt(r['refund_paise'])}",
                                   (r["id"], r["refund_paise"]))
         self.exchange.blockSignals(False)
+        has_credit = self.exchange.count() > 1
+        self.exchange.setVisible(has_credit)
+        self.exchange_lbl.setVisible(has_credit)
 
     # ------------------------------------------------------------- display
     def recalc(self):
@@ -526,6 +645,9 @@ class PosPage(QWidget):
             # e.g. the discount limit was lowered in Settings; drop the bill discount
             self.flash(exc.message)
             self.bill = BillDiscount()
+            if self.disc_value.text().strip():
+                self._set_disc_error(True)  # keep what was typed; Complete stays blocked until it is fixed
+                self.disc_info.setText("not applied")
             for ln in self.lines:
                 ln.disc_type, ln.disc_value = NONE, 0
             self.totals = sales.compute_for(self.ctx.settings, self.lines, self.bill, self.inter_state.isChecked())
@@ -546,8 +668,7 @@ class PosPage(QWidget):
         gst = self.ctx.settings.get_bool("gst_enabled")
         self.lbl["count"].setText(str(t.item_count))
         self.lbl["gross"].setText(fmt(t.gross))
-        self.lbl["item_disc"].setText("-" + fmt(t.item_discount) if t.item_discount else "0.00")
-        self.lbl["bill_disc"].setText("-" + fmt(t.bill_discount) if t.bill_discount else "0.00")
+        self.lbl["disc"].setText("-" + fmt(t.total_discount) if t.total_discount else "0.00")
         if gst:
             incl = self.ctx.settings.get_bool("prices_include_tax")
             kind = "IGST" if self.inter_state.isChecked() else "CGST+SGST"
@@ -559,12 +680,13 @@ class PosPage(QWidget):
         self.lbl["round"].setVisible(bool(t.round_off))
         self.lbl["round"].setText(fmt(t.round_off))
         self.total_lbl.setText(fmt(t.total))
-        if self.bill.type == PERCENT:
-            self.bill_disc_label.setText(f"{fmt_percent(self.bill.value)}% = Rs. {fmt(t.bill_discount)}")
-        elif self.bill.type == AMOUNT:
-            self.bill_disc_label.setText(f"Rs. {fmt(t.bill_discount)}")
-        else:
-            self.bill_disc_label.setText("None")
+        if not self.disc_value.property("invalid"):
+            if self.bill.type == PERCENT:
+                self.disc_info.setText(f"= Rs. {fmt(t.bill_discount)}")
+            elif self.bill.type == AMOUNT:
+                self.disc_info.setText(f"= {fmt_percent(t.bill_discount * 10000 // max(1, t.gross - t.item_discount))}%")
+            else:
+                self.disc_info.setText("max 100%")
         self.complete_btn.setEnabled(bool(self.lines))
         self.update_change()
 
@@ -655,6 +777,13 @@ class PosPage(QWidget):
                 dropped.append(d.get("product_name", "item") if isinstance(d, dict) else "item")
         b = state.get("bill") or {}
         self.bill = BillDiscount(b.get("type", NONE), int(b.get("value", 0)), b.get("reason", ""))
+        self.disc_type.blockSignals(True)
+        self.disc_type.setCurrentIndex(1 if self.bill.type == AMOUNT else 0)
+        self.disc_type.blockSignals(False)
+        from ...money import fmt_plain
+        self.disc_value.setText("" if self.bill.type == NONE else (
+            fmt_percent(self.bill.value) if self.bill.type == PERCENT else fmt_plain(self.bill.value)))
+        self._disc_type_changed()
         cid = state.get("customer_id")
         if cid:
             self.customer_id = cid
@@ -675,6 +804,12 @@ class PosPage(QWidget):
             return
         if not self.lines:
             self.flash("The bill is empty. Scan an item first.")
+            return
+        self.disc_timer.stop()
+        self.apply_bill_discount()
+        if self.disc_value.property("invalid"):
+            self.flash("Fix the bill discount first (0 to 100%, and not more than the allowed limit).")
+            self.focus_discount()
             return
         try:
             p = self._payment_values()
