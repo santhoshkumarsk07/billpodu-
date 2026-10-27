@@ -1,0 +1,61 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint and security checks
+        run: |
+          ruff check --select F,E9,B,S --ignore S101,S311,B008,S608 mw83 tests main.py
+          bandit -q -r mw83 main.py
+          pip-audit -r requirements.txt
+
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Build program folder
+        run: pyinstaller packaging/83mw.spec --noconfirm --clean
+
+      - name: Self-test the built exe (sale, receipt PDF, tag, backup)
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "selftest.txt"
+          $p = Start-Process dist/83MensWear/83MensWear.exe -ArgumentList "--self-test", $out -Wait -PassThru
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "self-test failed" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 83MensWear-windows
+          path: |
+            dist/83MensWear-Setup-*.exe
+          retention-days: 30

@@ -643,7 +643,7 @@ class PosPage(QWidget):
                 if not (v["variant_active"] and v["product_active"]):
                     raise ValidationError("archived")
                 self.lines.append(ln)
-            except (UserError, TypeError, KeyError):
+            except (UserError, TypeError, KeyError, ValueError):
                 dropped.append(d.get("product_name", "item") if isinstance(d, dict) else "item")
         b = state.get("bill") or {}
         self.bill = BillDiscount(b.get("type", NONE), int(b.get("value", 0)), b.get("reason", ""))

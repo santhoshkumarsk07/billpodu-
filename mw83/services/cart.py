@@ -39,8 +39,18 @@ class CartLine:
 
     @classmethod
     def from_dict(cls, d: dict) -> "CartLine":
-        known = {f for f in cls.__dataclass_fields__}
-        return cls(**{k: v for k, v in d.items() if k in known})
+        """Rebuild a line from saved (held) data, checking every field's type."""
+        out = {}
+        for name, f in cls.__dataclass_fields__.items():
+            if name not in d:
+                continue
+            value = d[name]
+            if f.type == "int" and (not isinstance(value, int) or isinstance(value, bool)):
+                raise ValueError(f"bad value for {name}")
+            if f.type == "str" and not isinstance(value, str):
+                raise ValueError(f"bad value for {name}")
+            out[name] = value
+        return cls(**out)
 
     @property
     def description(self) -> str:

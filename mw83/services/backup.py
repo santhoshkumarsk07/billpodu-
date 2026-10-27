@@ -28,6 +28,8 @@ NAME_RE = re.compile(r"^83MW-backup-\d{8}-\d{6}(?:-\d+)?(?:-[a-z-]+)?\.zip$")
 IMAGE_NAME_RE = re.compile(r"^images/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}$")
 REQUIRED_TABLES = {"settings", "products", "variants", "sales", "sale_items", "sale_payments", "stock_movements",
                    "customers", "returns"}
+COUNT_QUERIES = {"products": "SELECT COUNT(*) FROM products", "sales": "SELECT COUNT(*) FROM sales",
+                 "customers": "SELECT COUNT(*) FROM customers"}
 MAX_UNCOMPRESSED = 4 * 1024 ** 3
 MAX_MEMBERS = 200_000
 
@@ -199,8 +201,7 @@ def validate_backup(path: str | Path, extract_to: str | Path | None = None) -> d
                     raise RestoreError("The database inside the backup is damaged.")
                 version = conn.execute("PRAGMA user_version").fetchone()[0]
                 tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]  # noqa: S608 fixed names
-                          for t in ("products", "sales", "customers") if t in tables}
+                counts = {t: conn.execute(sql).fetchone()[0] for t, sql in COUNT_QUERIES.items() if t in tables}
             finally:
                 conn.close()
         except sqlite3.DatabaseError:

@@ -301,3 +301,40 @@ def test_stock_lists_and_value(db, make_product):
     assert [r["variant_id"] for r in inventory.stock_list(db, status="OUT")] == [vid]
     val = inventory.stock_value(db)
     assert val["units"] == 10 and val["cost_value"] == 10 * 50000
+
+
+def test_docs_schema_matches_migrations():
+    from pathlib import Path
+
+    from mw83.db.migrations import MIGRATIONS
+
+    text = (Path(__file__).parent.parent / "docs" / "schema.sql").read_text()
+    for _, sql in MIGRATIONS:
+        assert sql.strip() in text, "docs/schema.sql is out of date - regenerate it"
+
+
+def test_packaged_self_test_mode(tmp_path, monkeypatch):
+    from mw83.app import main
+
+    # self_test points the data folders at a temp dir; register them so they are restored afterwards
+    monkeypatch.setenv("MW83_DATA_DIR", str(tmp_path / "unused"))
+    monkeypatch.setenv("MW83_BACKUP_DIR", str(tmp_path / "unused-bk"))
+    out = tmp_path / "result.txt"
+    assert main(["prog", "--self-test", str(out)]) == 0
+    assert out.read_text().startswith("OK 83MW-0001")
+
+
+def test_migrations_preserve_data_on_reopen(db, make_product, cart_line, settings):
+    """Reopening an existing database must not lose or re-seed anything."""
+    from mw83.db import Database
+
+    make_product()
+    sell(db, settings, [cart_line("1000001")])
+    path = db.path
+    db.close()
+    again = Database(path)
+    assert again.scalar("SELECT COUNT(*) FROM sales") == 1
+    assert again.scalar("SELECT COUNT(*) FROM customers WHERE is_walkin = 1") == 1
+    assert again.schema_version() == 1
+    again.close()
+    db.reopen()

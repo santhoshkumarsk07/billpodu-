@@ -1,6 +1,7 @@
 """PDF copies of receipts and reports (reportlab, no internet needed)."""
 from __future__ import annotations
 
+from html import escape as _html_escape
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -10,10 +11,14 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from xml.sax.saxutils import escape
 
 from ..services.reports import Report
 from .receipt import Line
+
+
+def escape(text: str) -> str:
+    """Make text safe for reportlab's mini-markup (no tags from product names)."""
+    return _html_escape(str(text), quote=False)
 
 
 def receipt_pdf(lines: list[Line], path: str | Path, paper_mm: int = 80, width_chars: int = 48) -> Path:

@@ -12,6 +12,9 @@ from ..common import (AppContext, DateRange, button, fill_table, hint_label, hro
                       run_in_background, run_safely, title_label)
 
 
+MAX_SCREEN_ROWS = 5000
+
+
 class ReportsPage(QWidget):
     def __init__(self, ctx: AppContext):
         super().__init__()
@@ -56,11 +59,16 @@ class ReportsPage(QWidget):
     def show_report(self, rep: reports.Report):
         self.run_btn.setEnabled(True)
         self.report = rep
-        self.subtitle.setText(rep.subtitle + ("" if rep.rows else "  —  No data for this period."))
+        rows = rep.formatted_rows()
+        note = "" if rep.rows else "  —  No data for this period."
+        if len(rows) > MAX_SCREEN_ROWS:
+            note = f"  —  Showing the first {MAX_SCREEN_ROWS:,} of {len(rows):,} rows. Export to see all."
+            rows = rows[:MAX_SCREEN_ROWS]
+        self.subtitle.setText(rep.subtitle + note)
         self.table.clear()
         self.table.setColumnCount(len(rep.headers))
         self.table.setHorizontalHeaderLabels(rep.headers)
-        fill_table(self.table, rep.formatted_rows(), right_cols=rep.money_cols)
+        fill_table(self.table, rows, right_cols=rep.money_cols)
 
     def _name(self, ext: str) -> str:
         base = re.sub(r"[^A-Za-z0-9-]+", "-", self.report.title).strip("-")
