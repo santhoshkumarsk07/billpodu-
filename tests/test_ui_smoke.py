@@ -193,3 +193,22 @@ def test_restore_while_running_refreshes_pages(window, db, settings):
     scan(pos2, "1000001")
     pos2.complete()
     assert db.scalar("SELECT invoice_no FROM sales") == "83MW-0001"
+
+
+def test_default_customer_setting_and_search_dialog(window, db, settings):
+    from mw83.services import customers
+    from mw83.ui.dialogs import VariantSearchDialog
+
+    cid = customers.add_customer(db, "Regular Ravi", "9840000001")
+    settings.set("default_customer_id", str(cid))
+    pos = window.page("Billing / POS")
+    pos.new_bill(confirm_first=False)
+    assert pos.customer_id == cid
+    customers.set_active(db, cid, False)
+    pos.new_bill(confirm_first=False)
+    assert pos.customer_id == customers.walkin_id(db)
+    dlg = VariantSearchDialog(window.ctx, window, "shirt", multi=True)
+    assert dlg.table.rowCount() == 2
+    dlg.table.selectAll()
+    dlg.accept_current()
+    assert len(dlg.selected) == 2

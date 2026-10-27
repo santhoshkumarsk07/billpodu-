@@ -128,8 +128,22 @@ def prune_backups(dest_dir: str | Path, keep: int) -> list[Path]:
     return removed
 
 
+def auto_backup_due(settings: Settings) -> bool:
+    freq = settings.get("backup_frequency")
+    if freq == "OFF":
+        return False
+    last = settings.get("last_auto_backup")
+    if not last:
+        return True
+    try:
+        days = (datetime.strptime(today_str(), "%Y-%m-%d") - datetime.strptime(last, "%Y-%m-%d")).days
+    except ValueError:
+        return True
+    return days >= (7 if freq == "WEEKLY" else 1)
+
+
 def auto_backup_if_due(db: Database, settings: Settings) -> Path | None:
-    if not settings.get_bool("auto_backup") or settings.get("last_auto_backup") == today_str():
+    if not auto_backup_due(settings):
         return None
     path = create_backup(db, backup_dir(settings), "auto")
     settings.set("last_auto_backup", today_str())

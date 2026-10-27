@@ -195,6 +195,7 @@ def test_restore_rejects_bad_files(db, settings, tmp_path):
 
 
 def test_backup_retention_and_auto_once_a_day(db, settings, tmp_path):
+    assert settings.get("backup_frequency") == "DAILY"
     settings.set("backups_to_keep", "3")
     for _ in range(5):
         backup.manual_backup(db, settings)
@@ -325,3 +326,16 @@ def test_printed_tag_barcode_scans_back(qapp, code, kind, dpi, width):
     img.save(buf, "PNG")
     found = [r.text for r in zxingcpp.read_barcodes(Image.open(io.BytesIO(bytes(buf.data()))))]
     assert found == [code]
+
+
+def test_backup_frequency_weekly_and_off(db, settings, monkeypatch):
+    from mw83.services import backup as bk
+
+    settings.set("backup_frequency", "OFF")
+    assert bk.auto_backup_if_due(db, settings) is None
+    settings.set_many({"backup_frequency": "WEEKLY", "last_auto_backup": "2000-01-01"})
+    assert bk.auto_backup_due(settings)
+    monkeypatch.setattr(bk, "today_str", lambda: "2000-01-05")
+    assert not bk.auto_backup_due(settings)
+    monkeypatch.setattr(bk, "today_str", lambda: "2000-01-08")
+    assert bk.auto_backup_due(settings)

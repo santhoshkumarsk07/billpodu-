@@ -82,7 +82,6 @@ def main(argv: list[str] | None = None) -> int:
     sys.excepthook = excepthook
 
     lock = QLockFile(str(paths.data_dir() / "app.lock"))
-    lock.setStaleLockTime(0)
     if not lock.tryLock(100):
         QMessageBox.information(None, APP_NAME, "The billing app is already open. Look for it on the taskbar.")
         return 0

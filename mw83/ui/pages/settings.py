@@ -1,14 +1,14 @@
 """Shop, billing, GST, printer, inventory and backup settings."""
 from __future__ import annotations
 
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QLabel, QLineEdit, QPlainTextEdit,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QLabel, QLineEdit, QPlainTextEdit,
                                QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from ...errors import ValidationError
 from ...money import fmt_percent, fmt_plain, parse_percent, parse_rupees
 from ...printing import printers
 from ...printing.receipt import WIDTH_CHARS, build_test_receipt
-from ...services import backup
+from ...services import backup, customers
 from ...services.settings import INDIAN_STATES
 from ..common import (AppContext, button, hint_label, hrow, info, money_edit, percent_edit, show_error,
                       title_label)
@@ -59,10 +59,12 @@ class SettingsPage(QWidget):
         self.default_payment = QComboBox()
         for label, code in (("Cash", "CASH"), ("UPI", "UPI"), ("Card", "CARD")):
             self.default_payment.addItem(label, code)
+        self.default_customer = QComboBox()
         self.max_disc = percent_edit()
         self.auto_print = QCheckBox("Print the receipt automatically when a bill is completed")
         self.round_off = QCheckBox("Round bill total to the nearest rupee")
         f.addRow("Default payment method", self.default_payment)
+        f.addRow("Default customer on new bills", self.default_customer)
         f.addRow("Maximum discount on a bill (%)", self.max_disc)
         f.addRow(self.auto_print)
         f.addRow(self.round_off)
@@ -102,16 +104,22 @@ class SettingsPage(QWidget):
         self.receipt_font.setRange(5, 20)
         self.receipt_cut = QCheckBox("Cut paper after receipt (raw mode)")
         self.tag_printer = QComboBox()
+        self.tag_w, self.tag_h = QDoubleSpinBox(), QDoubleSpinBox()
+        for sp, lo, hi in ((self.tag_w, 15, 150), (self.tag_h, 10, 150)):
+            sp.setRange(lo, hi)
+            sp.setDecimals(1)
+            sp.setSuffix(" mm")
         f.addRow("Receipt printer", hrow(self.receipt_printer, button("Test print", self.test_receipt),
                                          stretch=False))
         f.addRow("Receipt paper width", self.receipt_width)
         f.addRow("Print mode", self.receipt_mode)
         f.addRow("Receipt font size (pt)", self.receipt_font)
         f.addRow(self.receipt_cut)
-        f.addRow("Tag printer", self.tag_printer)
-        f.addRow(hint_label("Tag size, fields and the tag test print are on the 'Barcode & Tags' screen. Install the "
-                            "printer's Windows driver first and print a Windows test page. Save settings before "
-                            "testing."))
+        f.addRow("Tag printer", hrow(self.tag_printer, button("Test print", self.test_tag), stretch=False))
+        f.addRow("Tag size (width × height)", hrow(self.tag_w, QLabel("×"), self.tag_h, stretch=False))
+        f.addRow(hint_label("Tag fields, font and margins are on the 'Barcode & Tags' screen. Install the printer's "
+                            "Windows driver first and print a Windows test page. Test print saves these settings "
+                            "first."))
         tabs.addTab(prn, "Printers")
 
         # inventory
@@ -132,11 +140,13 @@ class SettingsPage(QWidget):
         f = QFormLayout(bk)
         self.backup_dir = QLineEdit()
         self.backup_dir.setReadOnly(True)
-        self.auto_backup = QCheckBox("Make a backup automatically once a day (when the app is open)")
+        self.backup_freq = QComboBox()
+        for label, code in (("Every day (recommended)", "DAILY"), ("Every week", "WEEKLY"), ("Off", "OFF")):
+            self.backup_freq.addItem(label, code)
         self.keep = QSpinBox()
         self.keep.setRange(1, 365)
         f.addRow("Backup folder", hrow(self.backup_dir, button("Change…", self.choose_dir), stretch=False))
-        f.addRow(self.auto_backup)
+        f.addRow("Automatic backup (while the app is open)", self.backup_freq)
         f.addRow("Number of backups to keep", self.keep)
         f.addRow(hint_label("Best: choose a folder on a USB drive or an external disk, and copy backups off the "
                             "computer regularly."))
@@ -157,6 +167,11 @@ class SettingsPage(QWidget):
         self.footer.setText(s.get("receipt_footer"))
         self.policy.setText(s.get("return_policy"))
         self.default_payment.setCurrentIndex(max(0, self.default_payment.findData(s.get("default_payment"))))
+        self.default_customer.clear()
+        for c in customers.search(self.ctx.db, limit=1000):
+            self.default_customer.addItem(c["name"] + (f" ({c['phone']})" if c["phone"] else ""),
+                                          "" if c["is_walkin"] else str(c["id"]))
+        self.default_customer.setCurrentIndex(max(0, self.default_customer.findData(s.get("default_customer_id"))))
         self.max_disc.setText(fmt_percent(s.get_int("max_discount_percent_bp")))
         self.auto_print.setChecked(s.get_bool("auto_print_receipt"))
         self.round_off.setChecked(s.get_bool("round_off_total"))
@@ -181,11 +196,13 @@ class SettingsPage(QWidget):
         self.receipt_mode.setCurrentIndex(max(0, self.receipt_mode.findData(s.get("receipt_mode"))))
         self.receipt_font.setValue(int(s.get_float("receipt_font_pt")))
         self.receipt_cut.setChecked(s.get_bool("receipt_cut"))
+        self.tag_w.setValue(s.get_float("tag_width_mm"))
+        self.tag_h.setValue(s.get_float("tag_height_mm"))
         self.default_min.setValue(s.get_int("default_min_stock"))
         self.confirm_adj.setChecked(s.get_bool("confirm_adjustments"))
         self.large_adj.setValue(s.get_int("large_adjustment_qty"))
         self.backup_dir.setText(str(backup.backup_dir(s)))
-        self.auto_backup.setChecked(s.get_bool("auto_backup"))
+        self.backup_freq.setCurrentIndex(max(0, self.backup_freq.findData(s.get("backup_frequency"))))
         self.keep.setValue(s.get_int("backups_to_keep"))
 
     def choose_dir(self):
@@ -202,6 +219,7 @@ class SettingsPage(QWidget):
             "financial_year": self.financial_year.text().strip(),
             "receipt_footer": self.footer.text().strip(), "return_policy": self.policy.text().strip(),
             "default_payment": self.default_payment.currentData(),
+            "default_customer_id": self.default_customer.currentData() or "",
             "max_discount_percent_bp": parse_percent(self.max_disc.text() or "100", "Maximum discount"),
             "auto_print_receipt": self.auto_print.isChecked(), "round_off_total": self.round_off.isChecked(),
             "gst_enabled": self.gst_enabled.isChecked(), "shop_state": self.shop_state.currentText(),
@@ -214,9 +232,10 @@ class SettingsPage(QWidget):
             "receipt_width_mm": self.receipt_width.currentData(), "receipt_mode": self.receipt_mode.currentData(),
             "receipt_font_pt": self.receipt_font.value(), "receipt_cut": self.receipt_cut.isChecked(),
             "tag_printer": self.tag_printer.currentData() or "",
+            "tag_width_mm": self.tag_w.value(), "tag_height_mm": self.tag_h.value(),
             "default_min_stock": self.default_min.value(), "confirm_adjustments": self.confirm_adj.isChecked(),
             "large_adjustment_qty": self.large_adj.value(),
-            "backup_dir": self.backup_dir.text().strip(), "auto_backup": self.auto_backup.isChecked(),
+            "backup_dir": self.backup_dir.text().strip(), "backup_frequency": self.backup_freq.currentData(),
             "backups_to_keep": self.keep.value(),
         }
         if self.financial_year.text().strip() and not all(
@@ -245,3 +264,16 @@ class SettingsPage(QWidget):
             show_error(self, exc, "printing a test receipt")
             return
         info(self, "Test sent", "Settings saved and a test receipt was sent to the printer.")
+
+    def test_tag(self):
+        from ...printing.tags import TagTemplate, print_tags
+        from .tags import TEST_ITEM
+
+        try:
+            self.ctx.settings.set_many(self.collect())
+            print_tags(self.ctx.settings.get("tag_printer"), [(TEST_ITEM, 1)],
+                       TagTemplate.from_settings(self.ctx.settings))
+        except Exception as exc:  # noqa: BLE001
+            show_error(self, exc, "printing a test tag")
+            return
+        info(self, "Test sent", "Settings saved and a test tag was sent. Scan it: it should read 2000000000015.")

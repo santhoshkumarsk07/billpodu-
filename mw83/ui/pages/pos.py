@@ -474,7 +474,7 @@ class PosPage(QWidget):
             return
         self.lines = []
         self.bill = BillDiscount()
-        self.customer_id = customers.walkin_id(self.ctx.db)
+        self.customer_id = self._default_customer()
         self.client_ref = uuid.uuid4().hex
         for w in (self.cash, self.upi, self.upi_ref, self.card, self.card_ref, self.note, self.disc_reason):
             w.clear()
@@ -486,6 +486,14 @@ class PosPage(QWidget):
         self.focus_scan()
 
     # ------------------------------------------------------------- customer
+    def _default_customer(self) -> int:
+        chosen = self.ctx.settings.get("default_customer_id")
+        if chosen.isdigit():
+            row = self.ctx.db.one("SELECT id FROM customers WHERE id = ? AND active = 1", (int(chosen),))
+            if row:
+                return int(row["id"])
+        return customers.walkin_id(self.ctx.db)
+
     def pick_customer(self):
         dlg = CustomerPicker(self.ctx, self)
         if dlg.exec() and dlg.customer_id:

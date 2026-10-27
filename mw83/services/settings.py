@@ -19,6 +19,7 @@ DEFAULTS: dict[str, str] = {
     "return_policy": "",
     # billing
     "default_payment": "CASH",
+    "default_customer_id": "",
     "max_discount_percent_bp": "10000",  # discount limit (100 % = no limit)
     "auto_print_receipt": "1",
     "round_off_total": "0",
@@ -54,7 +55,7 @@ DEFAULTS: dict[str, str] = {
     "large_adjustment_qty": "20",
     # backup
     "backup_dir": "",
-    "auto_backup": "1",
+    "backup_frequency": "DAILY",
     "backups_to_keep": "30",
     "last_auto_backup": "",
     # ui
@@ -142,6 +143,10 @@ class Settings:
             raise ValidationError("Receipt width must be 58 mm or 80 mm.")
         if "receipt_mode" in values and values["receipt_mode"] not in ("DRIVER", "RAW"):
             raise ValidationError("Unknown receipt print mode.")
+        if "backup_frequency" in values and values["backup_frequency"] not in ("OFF", "DAILY", "WEEKLY"):
+            raise ValidationError("Backup frequency must be Off, Daily or Weekly.")
+        if values.get("default_customer_id") and not values["default_customer_id"].isdigit():
+            raise ValidationError("Unknown default customer.")
         if "default_payment" in values and values["default_payment"] not in PAYMENT_METHODS:
             raise ValidationError("Unknown payment method.")
         for key, lo, hi in (

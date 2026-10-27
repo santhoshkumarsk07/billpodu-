@@ -36,7 +36,7 @@ class BackupPage(QWidget):
             "A backup contains all products, stock, bills, customers, settings and product pictures. Restoring "
             "REPLACES all current data with the backup. Before restoring, the app always saves a safety backup of "
             "the current data (file name ends with 'before-restore'). Backups are never deleted when the app is "
-            "uninstalled. Change the folder, daily backup and how many to keep in Settings → Backup."))
+            "uninstalled. Change the folder, how often and how many to keep in Settings → Backup."))
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -44,9 +44,10 @@ class BackupPage(QWidget):
 
     def reload(self):
         d = backup.backup_dir(self.ctx.settings)
-        auto = "ON" if self.ctx.settings.get_bool("auto_backup") else "OFF"
+        auto = {"DAILY": "every day", "WEEKLY": "every week", "OFF": "OFF"}.get(
+            self.ctx.settings.get("backup_frequency"), "every day")
         last = self.ctx.settings.get("last_auto_backup") or "never"
-        self.where.setText(f"Backup folder: <b>{d}</b><br>Automatic daily backup: <b>{auto}</b> · last automatic "
+        self.where.setText(f"Backup folder: <b>{d}</b><br>Automatic backup: <b>{auto}</b> · last automatic "
                            f"backup: {last} · keeping the newest {self.ctx.settings.get_int('backups_to_keep')}")
         files = backup.list_backups(d)
         fill_table(self.table, [[p.name, f"{p.stat().st_size / 1024 / 1024:.1f} MB",
