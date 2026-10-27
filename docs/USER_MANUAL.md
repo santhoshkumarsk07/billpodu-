@@ -7,34 +7,46 @@ to come back to Billing.
 
 ## 1. Making a bill (Billing / POS)
 
-### Fast keyboard workflow
+### Fast workflow
 
-1. **Scan** each tag. The item is added; scanning the same size/colour again adds 1 to its quantity.
-   The scan box stays ready for the next scan — no clicking needed.
-   No barcode? Type into the same box and press **Enter**:
-   * the **item no.** (shown in the *Item no.* column of Inventory and Search, e.g. `25`),
-   * the **SKU** or style code (e.g. `MW000012`),
-   * or the **product name** — e.g. `cotton shirt l black`. If one item matches it is added; if several match,
-     a list opens so you can pick the size/colour with ↑/↓ and Enter.
-2. To give a bill discount, press **F5** and type the number: **10 means 10% off** the whole bill (from 0 to 100).
-   Change "% off" to "Rs. off" for a rupee amount. The box turns red and the bill cannot be completed if the
-   discount is not allowed (more than 100%, more than the bill, or above the limit in Settings).
-3. Press **F9** and type the cash received (or leave it empty for exact cash).
-4. Press **F12**. The bill is saved and the receipt prints (if automatic printing is on).
-5. The "Bill saved" window shows the **change to give**. Press **Enter** to print, or **Esc** for the next bill.
+The Billing screen goes top to bottom in the order you work:
+
+1. **Customer (optional)** — type the **Mobile** number. If the customer has bought before, their name fills in
+   automatically (green box). If not, type the **Name**: the customer is saved together with the bill, so the
+   next time only the mobile number is needed. Leave both empty for a walk-in customer. **Find…** (F4) searches
+   saved customers; **Clear** empties the box.
+2. **Add items** — two ways:
+   * **Barcode / Tag no.** (F2): scan the tag, or type the number printed under the barcode on the tag (or the item
+     no. / SKU) and press Enter. Scanning the same size/colour again adds 1 to its quantity.
+   * **Product name** (F3): start typing, e.g. `cotton shirt`. A list drops down with size, colour, price and stock.
+     Use ↓ and Enter (or click) to add the item. Typing the size/colour too (e.g. `cotton shirt l black`) and
+     pressing Enter adds that exact item.
+   * **Browse…** opens the full product list.
+3. **Discount (F5)** — type the number: **10 means 10% off** the whole bill (0 to 100). Switch to "Rs. off" for a
+   rupee amount. The box turns red and the bill cannot be completed if the discount is not allowed.
+4. **Payment (F9)** — choose how the customer pays:
+   * **Cash** (Ctrl+1): type the amount received or tap **Rs. 500 / 1000 / 2000**. The screen shows
+     **"Return to customer: Rs. …"**. Leave the box empty (or tap **Exact**) for exact cash.
+   * **UPI** (Ctrl+2): take the payment on your UPI QR/app; optionally type the UPI reference.
+   * **Card** (Ctrl+3): swipe/tap on your card machine; optionally type the reference.
+   * **Split** (Ctrl+4): type the UPI and/or card part; the rest is cash. Type the cash received to see the change.
+   The app only **records** UPI and card payments — check that the money arrived on your UPI app / card machine.
+5. Press **F12** (or click **COMPLETE BILL**). The bill is saved and the receipt prints (if automatic printing is
+   on). The "Bill saved" window shows the change to give. Press **Enter** to print, **Esc** for the next bill.
 
 ### Keys
 
 | Key | Action |
 |---|---|
-| F2 | Go to the scan box |
-| F3 | Search a product by name / brand / size / colour / item no. / SKU |
-| F4 | Choose or add a customer |
+| F2 | Go to the Barcode / Tag no. box |
+| F3 | Go to the Product name box |
+| F4 | Find a saved customer |
 | F5 | Bill discount box (type 10 = 10% off) |
 | F6 | Discount on the selected item |
 | F7 | Hold this bill |
 | F8 | Resume a held bill |
-| F9 | Go to payment |
+| F9 | Go to the payment amount |
+| Ctrl+1 / 2 / 3 / 4 | Pay by Cash / UPI / Card / Split |
 | F12 or Ctrl+Enter | Complete the bill |
 | Ctrl+N | New bill |
 | Ctrl+P | Reprint the last bill (marked DUPLICATE) |
@@ -61,11 +73,11 @@ A red bar under the scan box tells you about problems without stopping you:
 
 ### Payment
 
-* **Cash**: type the amount received; the change is shown. Leave it empty for exact cash.
-* **UPI / Card**: type the amount and optionally the reference number. The app only **records** the payment —
-  it does not take money electronically. Check the payment on your UPI app / card machine.
-* **Split payment**: type the UPI or card part; whatever is left is cash.
-* **Exchange credit**: choose a credit created by an exchange return (see Returns).
+* **Cash / UPI / Card / Split** buttons choose the payment mode (see step 4 above). Only the boxes for that mode
+  are shown. The default mode is set in Settings → Billing & GST.
+* **Exchange**: appears only when there is unused credit from an exchange return; choose it to use the credit.
+  The rest is paid in the chosen mode.
+* Held bills keep the customer and payment mode.
 
 ### Hold and resume
 

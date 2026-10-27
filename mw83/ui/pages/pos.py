@@ -11,8 +11,9 @@ import logging
 import uuid
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QGroupBox,
+from PySide6.QtGui import QKeySequence, QShortcut, QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QCompleter, QDialog, QFrame,
+                               QGridLayout, QGroupBox,
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
@@ -128,7 +129,7 @@ class PosPage(QWidget):
         self.ctx = ctx
         self.lines: list[CartLine] = []
         self.bill = BillDiscount()
-        self.customer_id = customers.walkin_id(ctx.db)
+        self.customer_id: int | None = None
         self.client_ref = uuid.uuid4().hex
         self.last_sale_id: int | None = None
         self.totals = None
@@ -140,12 +141,80 @@ class PosPage(QWidget):
     def _build(self):
         root = QHBoxLayout(self)
         left = QVBoxLayout()
+        left.setSpacing(6)
+
+        # 1. customer: mobile + name typed straight on the bill (leave empty for walk-in)
+        cust_box = QGroupBox("Customer  (leave empty for walk-in)   [F4 find]")
+        cl = QGridLayout(cust_box)
+        cl.setHorizontalSpacing(8)
+        self.mobile = QLineEdit()
+        self.mobile.setObjectName("custfield")
+        self.mobile.setPlaceholderText("Mobile no.")
+        self.mobile.setMaxLength(14)
+        from PySide6.QtGui import QRegularExpressionValidator
+        self.mobile.setValidator(QRegularExpressionValidator(r"^\+?[0-9 ]{0,14}$"))
+        self.mobile.textEdited.connect(self._mobile_edited)
+        self.mobile.returnPressed.connect(self.focus_scan)
+        self.cust_name = QLineEdit()
+        self.cust_name.setObjectName("custfield")
+        self.cust_name.setPlaceholderText("Customer name")
+        self.cust_name.setMaxLength(80)
+        self.cust_name.returnPressed.connect(self.focus_scan)
+        self.cust_status = QLabel()
+        self.cust_status.setObjectName("hint")
+        self.inter_state = QCheckBox("Other state (IGST)")
+        self.inter_state.toggled.connect(self._inter_state_changed)
+        self.cust_state = QComboBox()
+        self.cust_state.addItem("Customer's state…", "")
+        for st in INDIAN_STATES:
+            self.cust_state.addItem(st, st)
+        cl.addWidget(QLabel("Mobile"), 0, 0)
+        cl.addWidget(self.mobile, 0, 1)
+        cl.addWidget(QLabel("Name"), 0, 2)
+        cl.addWidget(self.cust_name, 0, 3)
+        cl.addWidget(button("Find…", self.pick_customer), 0, 4)
+        cl.addWidget(button("Clear", self.clear_customer), 0, 5)
+        self.cust_status.setWordWrap(True)
+        cl.addWidget(self.cust_status, 1, 1, 1, 2)
+        cl.addLayout(hrow(self.inter_state, self.cust_state, stretch=True), 1, 3, 1, 3)
+        cl.setColumnStretch(1, 2)
+        cl.setColumnStretch(3, 3)
+        left.addWidget(cust_box)
+
+        # 2. items: barcode / tag number, or product name with live suggestions
+        item_box = QGroupBox("Add items")
+        il = QGridLayout(item_box)
+        il.setHorizontalSpacing(8)
         self.scan = QLineEdit()
         self.scan.setObjectName("scan")
-        self.scan.setPlaceholderText("Scan barcode or type item no. / SKU / name  [F2]")
+        self.scan.setPlaceholderText("Scan / tag no.")
+        self.scan.setToolTip("Scan the barcode, or type the number printed on the tag, the item no. or the SKU, "
+                             "then press Enter.")
         self.scan.returnPressed.connect(self.on_scan)
         self.scan.installEventFilter(self)
-        left.addLayout(hrow(self.scan, button("Search  [F3]", self.open_search), stretch=False))
+        self.name_box = QLineEdit()
+        self.name_box.setObjectName("scan")
+        self.name_box.setPlaceholderText("Type product name…")
+        self.name_box.setToolTip("Type part of the name (e.g. 'cotton shirt L'), pick from the list and press Enter.")
+        self.name_model = QStandardItemModel(self)
+        self.name_completer = QCompleter(self.name_model, self)
+        self.name_completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        self.name_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.name_completer.setMaxVisibleItems(12)
+        self.name_box.setCompleter(self.name_completer)
+        self.name_completer.activated.connect(self._name_chosen)
+        self.name_timer = QTimer(self, singleShot=True, interval=180, timeout=self._refresh_name_list)
+        self.name_box.textEdited.connect(lambda _: self.name_timer.start())
+        self.name_box.returnPressed.connect(self.on_name_enter)
+        self._name_map: dict[str, int] = {}
+        il.addWidget(QLabel("Barcode / Tag no.  [F2]"), 0, 0)
+        il.addWidget(QLabel("Product name  [F3]"), 0, 1)
+        il.addWidget(self.scan, 1, 0)
+        il.addWidget(self.name_box, 1, 1)
+        il.addWidget(button("Browse…", self.open_search, tip="Open the full product list"), 1, 2)
+        il.setColumnStretch(0, 2)
+        il.setColumnStretch(1, 3)
+        left.addWidget(item_box)
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.hide()
@@ -163,31 +232,14 @@ class PosPage(QWidget):
         self.note.setPlaceholderText("Bill note (optional) — printed on the receipt")
         self.note.setMaxLength(300)
         left.addWidget(self.note)
-        left.addWidget(hint_label("Cash box empty = exact cash. Split payment: type the UPI/card part, the rest is cash. "
-                                  "Keys: F2 scan · F3 search · F4 customer · F5 bill discount · F6 item discount · "
-                                  "F7 hold · F8 resume · F9 payment · F12 complete · Ctrl+N new bill · "
-                                  "Ctrl+P reprint last bill"))
+        left.addWidget(hint_label("Keys: F2 barcode · F3 product name · F4 find customer · F5 discount · "
+                                  "F6 item discount · F7 hold · F8 resume · F9 amount received · F12 complete · "
+                                  "Ctrl+1 Cash · Ctrl+2 UPI · Ctrl+3 Card · Ctrl+4 Split · Ctrl+N new · Ctrl+P reprint"))
         root.addLayout(left, 3)
 
         right = QVBoxLayout()
         right.setSpacing(6)
         right.setContentsMargins(0, 0, 4, 0)
-
-        # customer (one compact row)
-        cust_box = QGroupBox("Customer  [F4]")
-        cl = QVBoxLayout(cust_box)
-        cl.setSpacing(4)
-        self.cust_label = QLabel()
-        cl.addLayout(hrow(self.cust_label, None, button("Change", self.pick_customer), stretch=False))
-        self.inter_state = QCheckBox("Customer from another state (IGST)")
-        self.inter_state.toggled.connect(self._inter_state_changed)
-        self.cust_state = QComboBox()
-        self.cust_state.addItem("Choose customer's state…", "")
-        for st in INDIAN_STATES:
-            self.cust_state.addItem(st, st)
-        cl.addWidget(self.inter_state)
-        cl.addWidget(self.cust_state)
-        right.addWidget(cust_box)
 
         # totals
         tot_box = QGroupBox("Bill total")
@@ -213,23 +265,20 @@ class PosPage(QWidget):
         tl.addWidget(self.total_lbl, 5, 1)
         right.addWidget(tot_box)
 
-        # payment, with the bill discount at the top
-        pay_box = QGroupBox("Discount && payment   (F5 discount · F9 payment)")
-        pl = QGridLayout(pay_box)
-        pl.setHorizontalSpacing(8)
-        pl.setVerticalSpacing(5)
-        pl.setColumnStretch(1, 1)
-        pl.setColumnStretch(2, 1)
+        # discount
+        disc_box = QGroupBox("Discount  [F5]")
+        dl = QGridLayout(disc_box)
+        dl.setHorizontalSpacing(8)
+        dl.setVerticalSpacing(4)
         self.disc_value = QLineEdit()
         self.disc_value.setObjectName("payfield")
         self.disc_value.setPlaceholderText("0")
         self.disc_value.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.disc_value.setToolTip("Type 10 for 10% off the whole bill (0 to 100).")
         self.disc_type = QComboBox()
         self.disc_type.addItem("% off", PERCENT)
         self.disc_type.addItem("Rs. off", AMOUNT)
         self.disc_reason = QLineEdit()
-        self.disc_reason.setPlaceholderText("Discount reason (optional)")
+        self.disc_reason.setPlaceholderText("Reason (optional)")
         self.disc_reason.setMaxLength(120)
         self.disc_timer = QTimer(self, singleShot=True, interval=250, timeout=self.apply_bill_discount)
         self.disc_value.textEdited.connect(lambda _: self.disc_timer.start())
@@ -237,43 +286,81 @@ class PosPage(QWidget):
         self.disc_info = QLabel()
         self.disc_info.setObjectName("hint")
         self.disc_type.currentIndexChanged.connect(self._disc_type_changed)
-        pl.addWidget(QLabel("Bill discount"), 0, 0)
-        pl.addWidget(self.disc_value, 0, 1)
-        pl.addWidget(self.disc_type, 0, 2)
-        pl.addWidget(self.disc_info, 1, 0)
-        pl.addWidget(self.disc_reason, 1, 1, 1, 2)
+        dl.addWidget(self.disc_value, 0, 0)
+        dl.addWidget(self.disc_type, 0, 1)
+        dl.addWidget(self.disc_info, 0, 2)
+        dl.addWidget(self.disc_reason, 1, 0, 1, 3)
+        dl.setColumnStretch(0, 2)
+        dl.setColumnStretch(1, 2)
+        dl.setColumnStretch(2, 2)
+        right.addWidget(disc_box)
+
+        # payment: pick the mode, then only the boxes for that mode are shown
+        pay_box = QGroupBox("Payment  [F9]")
+        pl = QGridLayout(pay_box)
+        pl.setHorizontalSpacing(6)
+        pl.setVerticalSpacing(5)
+        self.mode_group = QButtonGroup(self)
+        self.mode_buttons = {}
+        for col, (code, label) in enumerate((("CASH", "Cash"), ("UPI", "UPI"), ("CARD", "Card"), ("SPLIT", "Split"))):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setObjectName("mode")
+            b.setToolTip(f"Ctrl+{col + 1}")
+            self.mode_group.addButton(b)
+            self.mode_buttons[code] = b
+            b.clicked.connect(lambda _=False, c=code: self.set_mode(c))
+            pl.addWidget(b, 0, col)
+        self.mode = "CASH"
 
         self.cash = money_edit("exact amount")
         self.upi = money_edit("0.00")
         self.card = money_edit("0.00")
         self.upi_ref = QLineEdit()
-        self.upi_ref.setPlaceholderText("UPI ref no.")
+        self.upi_ref.setPlaceholderText("UPI ref no. (optional)")
         self.card_ref = QLineEdit()
-        self.card_ref.setPlaceholderText("Card ref no.")
-        for w in (self.cash, self.upi, self.card, self.disc_value):
-            w.setObjectName("payfield")
-        for w in (self.upi_ref, self.card_ref):
-            w.setMaxLength(60)
-        self.exchange = QComboBox()
+        self.card_ref.setPlaceholderText("Card ref no. (optional)")
         for w in (self.cash, self.upi, self.card):
+            w.setObjectName("payfield")
             w.textChanged.connect(lambda _: self.update_change())
             w.returnPressed.connect(self.complete)
+        for w in (self.upi_ref, self.card_ref):
+            w.setMaxLength(60)
+            w.returnPressed.connect(self.complete)
+        self.exchange = QComboBox()
         self.exchange.currentIndexChanged.connect(lambda _: self.update_change())
-        pl.addWidget(QLabel("Cash received"), 3, 0)
-        pl.addWidget(self.cash, 3, 1, 1, 2)
-        pl.addWidget(QLabel("UPI"), 4, 0)
-        pl.addWidget(self.upi, 4, 1)
-        pl.addWidget(self.upi_ref, 4, 2)
-        pl.addWidget(QLabel("Card"), 5, 0)
-        pl.addWidget(self.card, 5, 1)
-        pl.addWidget(self.card_ref, 5, 2)
-        self.exchange_lbl = QLabel("Exchange credit")
-        pl.addWidget(self.exchange_lbl, 6, 0)
-        pl.addWidget(self.exchange, 6, 1, 1, 2)
+
+        self.cash_lbl = QLabel("Amount received")
+        pl.addWidget(self.cash_lbl, 3, 0, 1, 2)
+        pl.addWidget(self.cash, 3, 2, 1, 2)
+        self.quick = QWidget()
+        ql = QHBoxLayout(self.quick)
+        ql.setContentsMargins(0, 0, 0, 0)
+        ql.setSpacing(4)
+        for label, value in (("Exact", None), ("500", 500), ("1000", 1000), ("2000", 2000)):
+            b = QPushButton(label if value is None else f"Rs. {label}")
+            b.setObjectName("quick")
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.clicked.connect(lambda _=False, v=value: self.quick_cash(v))
+            ql.addWidget(b)
+        pl.addWidget(self.quick, 4, 0, 1, 4)
+        self.upi_lbl = QLabel("UPI")
+        pl.addWidget(self.upi_lbl, 1, 0)
+        pl.addWidget(self.upi, 1, 1)
+        pl.addWidget(self.upi_ref, 1, 2, 1, 2)
+        self.card_lbl = QLabel("Card")
+        pl.addWidget(self.card_lbl, 2, 0)
+        pl.addWidget(self.card, 2, 1)
+        pl.addWidget(self.card_ref, 2, 2, 1, 2)
+        self.exchange_lbl = QLabel("Exchange")
+        pl.addWidget(self.exchange_lbl, 5, 0)
+        pl.addWidget(self.exchange, 5, 1, 1, 3)
         self.change_lbl = QLabel()
         self.change_lbl.setObjectName("change")
         self.change_lbl.setWordWrap(True)
-        pl.addWidget(self.change_lbl, 7, 0, 1, 3)
+        pl.addWidget(self.change_lbl, 6, 0, 1, 4)
+        for c in range(4):
+            pl.setColumnStretch(c, 1)
         right.addWidget(pay_box)
         right.addStretch(1)
         panel = QWidget()
@@ -306,7 +393,9 @@ class PosPage(QWidget):
 
     def _shortcuts(self):
         keys = {
-            "F2": self.focus_scan, "F3": self.open_search, "F4": self.pick_customer, "F5": self.focus_discount,
+            "F2": self.focus_scan, "F3": self.focus_name, "F4": self.pick_customer, "F5": self.focus_discount,
+            "Ctrl+1": lambda: self.set_mode("CASH"), "Ctrl+2": lambda: self.set_mode("UPI"),
+            "Ctrl+3": lambda: self.set_mode("CARD"), "Ctrl+4": lambda: self.set_mode("SPLIT"),
             "F6": self.item_discount, "F7": self.hold, "F8": self.resume, "F9": self.focus_payment,
             "F12": self.complete, "Ctrl+Return": self.complete, "Ctrl+Enter": self.complete,
             "Ctrl+N": self.new_bill, "Ctrl+P": self.reprint_last,
@@ -350,9 +439,60 @@ class PosPage(QWidget):
         self.scan.setFocus()
         self.scan.selectAll()
 
+    def focus_name(self):
+        self.name_box.setFocus()
+        self.name_box.selectAll()
+
     def focus_payment(self):
-        self.cash.setFocus()
-        self.cash.selectAll()
+        target = {"CASH": self.cash, "UPI": self.upi_ref, "CARD": self.card_ref, "SPLIT": self.upi}[self.mode]
+        target.setFocus()
+        target.selectAll()
+
+    @staticmethod
+    def _suggestion(v: dict) -> str:
+        extra = " / ".join(x for x in (v["size"], v["colour"]) if x)
+        return (f"{v['product_name']}{'  (' + extra + ')' if extra else ''}   ·   Rs. {fmt(v['price'])}"
+                f"   ·   stock {v['stock']}   ·   #{v['variant_id']}")
+
+    def _refresh_name_list(self):
+        text = self.name_box.text().strip()
+        self.name_model.clear()
+        self._name_map = {}
+        if len(text) < 2:
+            return
+        for v in catalog.search_variants(self.ctx.db, text, limit=30):
+            label = self._suggestion(v)
+            self._name_map[label] = v["variant_id"]
+            item = QStandardItem(label)
+            if v["stock"] <= 0:
+                item.setForeground(Qt.GlobalColor.gray)
+            self.name_model.appendRow(item)
+        if self._name_map and self.name_box.hasFocus():
+            self.name_completer.complete()
+
+    def _name_chosen(self, label: str):
+        vid = self._name_map.get(label)
+        if vid is None:
+            return
+        QTimer.singleShot(0, self.name_box.clear)  # the completer writes the label into the box first
+        self.add_variant(catalog.get_variant(self.ctx.db, vid))
+        self.name_box.setFocus()
+
+    def on_name_enter(self):
+        text = self.name_box.text().strip()
+        if text in self._name_map:
+            return  # handled by the suggestion list
+        if not text:
+            return
+        matches = catalog.narrow_by_words(catalog.search_variants(self.ctx.db, text, limit=50), text)
+        self.name_box.clear()
+        if len(matches) == 1:
+            self.add_variant(matches[0], text)
+        elif matches:
+            self._choose(text)
+        else:
+            self.flash(f"No product found with the name '{text}'.")
+        self.name_box.setFocus()
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -363,9 +503,7 @@ class PosPage(QWidget):
         gst = self.ctx.settings.get_bool("gst_enabled")
         self.inter_state.setVisible(gst)
         self.cust_state.setVisible(gst and self.inter_state.isChecked())
-        self.cash.setPlaceholderText("exact amount" if self.ctx.settings.get("default_payment") == "CASH" else "")
         self._load_exchange_credits()
-        self._update_customer_label()
         self.recalc()
 
     def _inter_state_changed(self, checked: bool):
@@ -585,11 +723,13 @@ class PosPage(QWidget):
             return
         self.lines = []
         self.bill = BillDiscount()
-        self.customer_id = self._default_customer()
         self.client_ref = uuid.uuid4().hex
         for w in (self.cash, self.upi, self.upi_ref, self.card, self.card_ref, self.note, self.disc_reason,
-                  self.disc_value):
+                  self.disc_value, self.mobile, self.cust_name, self.name_box):
             w.clear()
+        self._use_customer(self._default_customer())
+        default_mode = self.ctx.settings.get("default_payment")
+        self.set_mode(default_mode if default_mode in self.mode_buttons else "CASH")
         self.disc_type.blockSignals(True)
         self.disc_type.setCurrentIndex(0)
         self.disc_type.blockSignals(False)
@@ -597,33 +737,69 @@ class PosPage(QWidget):
         self.inter_state.setChecked(False)
         self.cust_state.setCurrentIndex(0)
         self._load_exchange_credits()
-        self._update_customer_label()
         self.recalc()
         self.focus_scan()
 
     # ------------------------------------------------------------- customer
-    def _default_customer(self) -> int:
+    def _default_customer(self) -> int | None:
         chosen = self.ctx.settings.get("default_customer_id")
         if chosen.isdigit():
-            row = self.ctx.db.one("SELECT id FROM customers WHERE id = ? AND active = 1", (int(chosen),))
+            row = self.ctx.db.one("SELECT id FROM customers WHERE id = ? AND active = 1 AND is_walkin = 0",
+                                  (int(chosen),))
             if row:
                 return int(row["id"])
-        return customers.walkin_id(self.ctx.db)
+        return None
+
+    def _use_customer(self, customer_id: int | None):
+        """Show a saved customer (fields locked), or clear to typing mode when None."""
+        self.customer_id = customer_id
+        if customer_id is None:
+            self.cust_name.setReadOnly(False)
+            self.cust_status.setText("")
+            return
+        c = customers.get_customer(self.ctx.db, customer_id)
+        self.mobile.setText(c["phone"])
+        self.cust_name.setText(c["name"])
+        self.cust_name.setReadOnly(True)
+        bills = self.ctx.db.scalar("SELECT COUNT(*) FROM sales WHERE customer_id = ? AND status='COMPLETED'",
+                                   (customer_id,), 0)
+        self.cust_status.setText(f"✔ Saved customer · {bills} earlier bill(s)")
+
+    def _mobile_edited(self, text: str):
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if self.customer_id is not None:          # the number was changed: forget the found customer
+            self.customer_id = None
+            self.cust_name.clear()
+            self.cust_name.setReadOnly(False)
+        if len(digits) >= 10:
+            found = customers.find_by_mobile(self.ctx.db, text)
+            if found:
+                self._use_customer(found["id"])
+                return
+            try:
+                customers.normalize_mobile(text)
+                self.cust_status.setText("New customer — saved with this bill")
+            except UserError as exc:
+                self.cust_status.setText(exc.message)
+        elif digits:
+            self.cust_status.setText(f"{len(digits)} of 10 digits")
+        else:
+            self.cust_status.setText("")
+
+    def clear_customer(self):
+        self.mobile.clear()
+        self.cust_name.clear()
+        self._use_customer(None)
+        self.mobile.setFocus()
 
     def pick_customer(self):
         dlg = CustomerPicker(self.ctx, self)
         if dlg.exec() and dlg.customer_id:
-            self.customer_id = dlg.customer_id
-            self._update_customer_label()
+            if dlg.customer_id == customers.walkin_id(self.ctx.db):
+                self.clear_customer()
+            else:
+                self._use_customer(dlg.customer_id)
         self.focus_scan()
-
-    def _update_customer_label(self):
-        try:
-            c = customers.get_customer(self.ctx.db, self.customer_id)
-        except UserError:
-            self.customer_id = customers.walkin_id(self.ctx.db)
-            c = customers.get_customer(self.ctx.db, self.customer_id)
-        self.cust_label.setText(f"<b>{c['name']}</b>" + (f"  ({c['phone']})" if c["phone"] else ""))
 
     def _load_exchange_credits(self):
         self.exchange.blockSignals(True)
@@ -690,26 +866,58 @@ class PosPage(QWidget):
         self.complete_btn.setEnabled(bool(self.lines))
         self.update_change()
 
+    def set_mode(self, mode: str):
+        self.mode = mode
+        self.mode_buttons[mode].setChecked(True)
+        cash_like = mode in ("CASH", "SPLIT")
+        self.cash_lbl.setText("Cash received" if mode == "SPLIT" else "Amount received")
+        for w in (self.cash_lbl, self.cash, self.quick):
+            w.setVisible(cash_like)
+        for w in (self.upi_lbl, self.upi_ref):
+            w.setVisible(mode in ("UPI", "SPLIT"))
+        for w in (self.card_lbl, self.card_ref):
+            w.setVisible(mode in ("CARD", "SPLIT"))
+        self.upi.setVisible(mode == "SPLIT")
+        self.card.setVisible(mode == "SPLIT")
+        if mode != "SPLIT":
+            self.upi.clear()
+            self.card.clear()
+        if not cash_like:
+            self.cash.clear()
+        self.update_change()
+
+    def quick_cash(self, rupees: int | None):
+        """Exact = leave the box empty (exact cash); the note buttons fill in that amount."""
+        if rupees is None:
+            self.cash.clear()
+        else:
+            self.cash.setText(str(rupees))
+        self.update_change()
+        self.cash.setFocus()
+
     def _payment_values(self) -> dict:
         """Read payment boxes. Empty cash means 'exact cash for whatever is left'."""
         from ..common import money_text
 
         total = self.totals.total if self.totals else 0
-        upi = money_text(self.upi, "UPI amount")
-        card = money_text(self.card, "Card amount")
         ex = self.exchange.currentData()
         exchange = ex[1] if ex else 0
-        if self.cash.text().strip() == "":
-            if not upi and not card and not exchange:
-                default = self.ctx.settings.get("default_payment")
-                if default == "UPI":
-                    upi = total
-                elif default == "CARD":
-                    card = total
-            cash = max(0, total - upi - card - exchange)
-        else:
+        due = max(0, total - exchange)
+        upi = card = 0
+        if self.mode == "UPI":
+            upi = due
+        elif self.mode == "CARD":
+            card = due
+        elif self.mode == "SPLIT":
+            upi = money_text(self.upi, "UPI amount")
+            card = money_text(self.card, "Card amount")
+        cash_part = max(0, due - upi - card)
+        if self.mode in ("CASH", "SPLIT") and self.cash.text().strip():
             cash = money_text(self.cash, "Cash received")
-        return {"upi": upi, "card": card, "cash": cash, "exchange": exchange, "exchange_id": ex[0] if ex else None}
+        else:
+            cash = cash_part   # empty box = exact cash
+        return {"upi": upi, "card": card, "cash": cash, "exchange": exchange, "exchange_id": ex[0] if ex else None,
+                "cash_part": cash_part}
 
     def update_change(self):
         if not self.totals or not self.lines:
@@ -719,7 +927,15 @@ class PosPage(QWidget):
             p = self._payment_values()
             st = sales.cartmod.settle(self.totals.total, upi=p["upi"], card=p["card"], exchange=p["exchange"],
                                       cash_received=p["cash"])
-            self.change_lbl.setText(f"Change due: Rs. {fmt(st.change)}" if st.change else "No change due")
+            if self.mode == "UPI":
+                text = f"Collect Rs. {fmt(p['upi'])} by UPI"
+            elif self.mode == "CARD":
+                text = f"Collect Rs. {fmt(p['card'])} on the card machine"
+            elif self.mode == "SPLIT":
+                text = f"Cash Rs. {fmt(p['cash_part'])}" + (f" · Return Rs. {fmt(st.change)}" if st.change else "")
+            else:
+                text = f"Return to customer: Rs. {fmt(st.change)}" if st.change else "Exact amount — no change"
+            self.change_lbl.setText(text)
             self.change_lbl.setStyleSheet("")
         except UserError as exc:
             self.change_lbl.setText(exc.message)
@@ -728,14 +944,16 @@ class PosPage(QWidget):
     # ------------------------------------------------------------- hold / resume
     def _state(self) -> dict:
         return {"lines": [ln.to_dict() for ln in self.lines], "bill": vars(self.bill).copy(),
-                "customer_id": self.customer_id, "note": self.note.text(), "reason": self.disc_reason.text(),
+                "customer_id": self.customer_id, "mobile": self.mobile.text(), "name": self.cust_name.text(),
+                "mode": self.mode, "note": self.note.text(), "reason": self.disc_reason.text(),
                 "inter_state": self.inter_state.isChecked(), "customer_state": self.cust_state.currentData() or ""}
 
     def hold(self):
         if not self.lines:
             self.flash("There is nothing to hold. The bill is empty.")
             return
-        label, ok = QInputDialog.getText(self, "Hold bill", "Name for this held bill (e.g. customer name):")
+        label, ok = QInputDialog.getText(self, "Hold bill", "Name for this held bill (e.g. customer name):",
+                                         text=self.cust_name.text() or self.mobile.text())
         if not ok:
             return
         try:
@@ -785,14 +1003,20 @@ class PosPage(QWidget):
             fmt_percent(self.bill.value) if self.bill.type == PERCENT else fmt_plain(self.bill.value)))
         self._disc_type_changed()
         cid = state.get("customer_id")
-        if cid:
-            self.customer_id = cid
+        if isinstance(cid, int) and self.ctx.db.scalar("SELECT 1 FROM customers WHERE id = ? AND is_walkin = 0",
+                                                       (cid,)):
+            self._use_customer(cid)
+        else:
+            self._use_customer(None)
+            self.mobile.setText(str(state.get("mobile", ""))[:14])
+            self.cust_name.setText(str(state.get("name", ""))[:80])
+        if state.get("mode") in self.mode_buttons:
+            self.set_mode(state["mode"])
         self.note.setText(state.get("note", ""))
         self.disc_reason.setText(state.get("reason", ""))
         self.inter_state.setChecked(bool(state.get("inter_state")))
         idx = self.cust_state.findData(state.get("customer_state", ""))
         self.cust_state.setCurrentIndex(max(0, idx))
-        self._update_customer_label()
         self.recalc()
         if dropped:
             self.flash("Some items are no longer available and were removed: " + ", ".join(dropped))
@@ -816,7 +1040,8 @@ class PosPage(QWidget):
             req = sales.SaleRequest(
                 lines=self.lines, bill_discount=BillDiscount(self.bill.type, self.bill.value,
                                                              self.disc_reason.text()),
-                customer_id=self.customer_id,
+                customer_id=self.customer_id, customer_name=self.cust_name.text(),
+                customer_mobile=self.mobile.text(),
                 payment=sales.PaymentInput(upi=p["upi"], card=p["card"], cash_received=p["cash"],
                                            upi_ref=self.upi_ref.text(), card_ref=self.card_ref.text(),
                                            exchange_return_id=p["exchange_id"]),

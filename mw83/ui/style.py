@@ -14,7 +14,7 @@ QLabel#error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; b
                font-weight: bold; }
 QLabel#ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; border-radius: 4px; padding: 6px 10px; }
 QLabel#total { font-size: 24pt; font-weight: bold; color: #111827; }
-QLabel#change { font-size: 18pt; font-weight: bold; color: #166534; }
+QLabel#change { font-size: 15pt; font-weight: bold; color: #166534; }
 QLabel#card_value { font-size: 18pt; font-weight: bold; color: #111827; }
 QLabel#card_title { color: #6b7280; }
 QFrame#card { background: white; border: 1px solid #e5e7eb; border-radius: 8px; }
@@ -27,9 +27,15 @@ QLineEdit#payfield { font-size: 13pt; font-weight: bold; min-height: 26px; backg
            border: 2px solid #f59e0b; }
 QLineEdit#payfield:focus { border: 2px solid #2563eb; background: white; }
 QLineEdit[invalid="true"] { border: 2px solid #dc2626; background: #fef2f2; }
+QLineEdit#custfield { font-size: 12pt; min-height: 26px; }
+QLineEdit#custfield:read-only { background: #f0fdf4; border: 1px solid #86efac; }
+QPushButton#mode { font-size: 12pt; font-weight: bold; padding: 8px 4px; background: #f8fafc;
+           border: 2px solid #cbd5e1; }
+QPushButton#mode:checked { background: #1d4ed8; color: white; border: 2px solid #1e40af; }
+QPushButton#quick { padding: 4px 6px; background: #f1f5f9; }
 QLabel#payable_title { font-size: 12pt; font-weight: bold; color: #111827; }
 QScrollArea { background: transparent; }
-QLineEdit#scan { font-size: 16pt; padding: 8px; border: 2px solid #f59e0b; }
+QLineEdit#scan { font-size: 14pt; padding: 6px; border: 2px solid #f59e0b; }
 QPushButton { background: white; border: 1px solid #cbd5e1; border-radius: 4px; padding: 6px 12px; }
 QPushButton:hover { background: #eef2ff; }
 QPushButton:disabled { color: #9ca3af; }

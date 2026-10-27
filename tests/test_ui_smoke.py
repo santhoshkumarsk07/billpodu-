@@ -108,7 +108,9 @@ def test_hold_and_resume(window, db, monkeypatch):
 def test_split_payment_through_ui(window, db):
     pos = window.page("Billing / POS")
     scan(pos, "1000001")
+    pos.set_mode("SPLIT")
     QTest.keyClicks(pos.upi, "500")
+    assert "Cash Rs. 499.00" in pos.change_lbl.text()
     pos.complete()
     pays = dict(db.all("SELECT method, amount_paise FROM sale_payments"))
     assert pays == {"UPI": 50000, "CASH": 49900}
@@ -205,9 +207,10 @@ def test_default_customer_setting_and_search_dialog(window, db, settings):
     pos = window.page("Billing / POS")
     pos.new_bill(confirm_first=False)
     assert pos.customer_id == cid
+    assert pos.cust_name.text() == "Regular Ravi" and pos.mobile.text() == "9840000001"
     customers.set_active(db, cid, False)
     pos.new_bill(confirm_first=False)
-    assert pos.customer_id == customers.walkin_id(db)
+    assert pos.customer_id is None and pos.cust_name.text() == ""   # empty = walk-in
     dlg = VariantSearchDialog(window.ctx, window, "shirt", multi=True)
     assert dlg.table.rowCount() == 2
     dlg.table.selectAll()
@@ -289,3 +292,103 @@ def test_stylesheet_and_icons_load(app):
     assert "ARROW_" not in css and css.count("{") == css.count("}")
     app.setStyleSheet(css)
     app.setStyleSheet("")
+
+
+def test_customer_mobile_on_bill_new_then_found(window, db):
+    from mw83.services import customers
+
+    pos = window.page("Billing / POS")
+    QTest.keyClicks(pos.mobile, "98400 12345")
+    assert "New customer" in pos.cust_status.text()
+    QTest.keyClicks(pos.cust_name, "Ravi Kumar")
+    scan(pos, "1000001")
+    pos.complete()
+    c = customers.find_by_mobile(db, "9840012345")
+    assert c["name"] == "Ravi Kumar" and c["bills"] == 1
+    assert db.scalar("SELECT customer_name FROM sales") == "Ravi Kumar"
+    # next visit: typing the mobile fills the name and locks it
+    QTest.keyClicks(pos.mobile, "9840012345")
+    assert pos.cust_name.text() == "Ravi Kumar" and pos.cust_name.isReadOnly()
+    assert pos.customer_id == c["id"]
+    scan(pos, "1000001")
+    pos.complete()
+    assert db.scalar("SELECT COUNT(*) FROM customers WHERE phone = '9840012345'") == 1
+    # wrong mobile is refused with nothing saved
+    QTest.keyClicks(pos.mobile, "12345")
+    scan(pos, "1000001")
+    pos.complete()
+    assert db.scalar("SELECT COUNT(*) FROM sales") == 2
+    pos.clear_customer()
+    assert pos.mobile.text() == "" and not pos.cust_name.isReadOnly()
+
+
+def test_walkin_when_customer_empty(window, db):
+    from mw83.services import customers
+
+    pos = window.page("Billing / POS")
+    scan(pos, "1000001")
+    pos.complete()
+    assert db.scalar("SELECT customer_id FROM sales") == customers.walkin_id(db)
+
+
+def test_product_name_box_suggestions_and_enter(window, db, monkeypatch):
+    from mw83.services import catalog
+
+    pos = window.page("Billing / POS")
+    pos.name_box.setText("cotton")
+    pos._refresh_name_list()
+    assert pos.name_model.rowCount() == 2
+    label = pos.name_model.item(1).text()
+    assert "Rs. 999.00" in label and "stock" in label
+    pos._name_chosen(label)                       # picking from the drop-down list
+    assert len(pos.lines) == 1
+    pos.name_box.clear()
+    QTest.keyClicks(pos.name_box, "cotton shirt m black")
+    QTest.keyClick(pos.name_box, Qt.Key.Key_Return)   # typed name + Enter, exactly one match
+    m = catalog.variant_by_code(db, "1000001")["variant_id"]
+    assert sum(ln.qty for ln in pos.lines) == 2
+    assert any(ln.variant_id == m for ln in pos.lines)
+    assert pos.name_box.text() == ""
+
+
+def test_upi_and_card_modes_and_quick_cash(window, db):
+    pos = window.page("Billing / POS")
+    scan(pos, "1000001")
+    pos.set_mode("UPI")
+    assert not pos.cash.isVisible() and pos.upi_ref.isVisible() and not pos.upi.isVisible()
+    assert "Collect Rs. 999.00 by UPI" in pos.change_lbl.text()
+    QTest.keyClicks(pos.upi_ref, "T123")
+    pos.complete()
+    assert db.all("SELECT method, amount_paise, reference FROM sale_payments")[0][:] == ("UPI", 99900, "T123")
+    scan(pos, "1000001")
+    pos.set_mode("CARD")
+    pos.complete()
+    assert db.scalar("SELECT method FROM sale_payments ORDER BY id DESC LIMIT 1") == "CARD"
+    scan(pos, "1000001")
+    pos.set_mode("CASH")
+    pos.quick_cash(2000)
+    assert "Return to customer: Rs. 1,001.00" in pos.change_lbl.text()
+    pos.quick_cash(None)
+    assert "no change" in pos.change_lbl.text()
+
+
+def test_hold_keeps_customer(window, db, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    from mw83.ui.pages import pos as posmod
+
+    pos = window.page("Billing / POS")
+    QTest.keyClicks(pos.mobile, "9876543210")
+    QTest.keyClicks(pos.cust_name, "Arun")
+    scan(pos, "1000001")
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: (k.get("text", ""), True)))
+    pos.hold()
+    assert pos.mobile.text() == ""
+
+    def fake_exec(self):
+        self.held_id = db.scalar("SELECT id FROM held_bills")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(posmod.HeldBillsDialog, "exec", fake_exec)
+    pos.resume()
+    assert pos.mobile.text() == "9876543210" and pos.cust_name.text() == "Arun"

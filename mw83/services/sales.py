@@ -18,7 +18,7 @@ from ..money import fmt
 from . import cart as cartmod
 from .cart import BillDiscount, CartLine, TaxConfig
 from .catalog import get_variant
-from .customers import walkin_id
+from .customers import find_or_create
 from .inventory import record_movement
 from .settings import Settings
 
@@ -81,6 +81,8 @@ class SaleRequest:
     inter_state: bool = False
     customer_state: str = ""
     client_ref: str = field(default_factory=lambda: uuid.uuid4().hex)
+    customer_name: str = ""     # typed on the billing screen (used when customer_id is None)
+    customer_mobile: str = ""
 
 
 def invoice_number(db: Database, settings: Settings) -> str:
@@ -141,7 +143,10 @@ def complete_sale(db: Database, settings: Settings, req: SaleRequest) -> int:
             raise StockError("Not enough stock to complete this bill:\n" + "\n".join(problems)
                              + "\n\nReceive the stock in Inventory first, or reduce the quantity.")
 
-        customer_id = req.customer_id or walkin_id(db)
+        if req.customer_id:
+            customer_id = req.customer_id
+        else:
+            customer_id = find_or_create(db, req.customer_name, req.customer_mobile)
         cust = db.one("SELECT id, name, phone, is_walkin FROM customers WHERE id = ?", (customer_id,))
         if cust is None:
             raise ValidationError("The selected customer no longer exists.")

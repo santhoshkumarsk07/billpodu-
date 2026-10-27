@@ -356,3 +356,29 @@ def test_sale_uses_current_product_details_but_quoted_price(db, settings, make_p
     assert item["product_name"] == "Classic Cotton Shirt" and item["unit_cost_paise"] == 60000
     assert item["gst_rate_bp"] == 1200 and sale["cgst_paise"] > 0
     assert item["unit_price_paise"] == 99900
+
+
+def test_customer_typed_on_bill_is_found_or_created(db, settings, make_product, cart_line):
+    from mw83.services import customers
+
+    make_product()
+    assert customers.normalize_mobile("+91 98400-12345") == "9840012345"
+    for bad in ("12345", "1234567890", "98400123456"):
+        with pytest.raises(ValidationError):
+            customers.normalize_mobile(bad)
+    sid = sell(db, settings, [cart_line("1000001")], customer_name="Ravi", customer_mobile="98400 12345")
+    s = sales.get_sale(db, sid)
+    assert s["customer_name"] == "Ravi" and s["customer_phone"] == "9840012345"
+    sid2 = sell(db, settings, [cart_line("1000001")], customer_name="", customer_mobile="9840012345")
+    assert sales.get_sale(db, sid2)["customer_id"] == s["customer_id"]       # same customer, not a duplicate
+    assert customers.find_by_mobile(db, "9840012345")["bills"] == 2
+    walk = sell(db, settings, [cart_line("1000001")])
+    assert sales.get_sale(db, walk)["customer_id"] == customers.walkin_id(db)
+
+
+def test_bad_mobile_on_bill_saves_nothing(db, settings, make_product, cart_line):
+    make_product()
+    with pytest.raises(ValidationError):
+        sell(db, settings, [cart_line("1000001")], customer_name="X", customer_mobile="12345")
+    assert db.scalar("SELECT COUNT(*) FROM sales") == 0
+    assert db.scalar("SELECT COUNT(*) FROM customers") == 1  # only walk-in

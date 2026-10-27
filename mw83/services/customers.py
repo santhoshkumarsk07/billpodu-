@@ -10,6 +10,61 @@ from ..errors import NotFoundError, ValidationError
 PHONE_RE = re.compile(r"^\+?[0-9 -]{6,16}$")
 
 
+MOBILE_RE = re.compile(r"^[6-9][0-9]{9}$")
+
+
+def normalize_mobile(text: str) -> str:
+    """'+91 98400-12345' -> '9840012345'. Raises ValidationError if it is not a 10-digit Indian mobile."""
+    digits = re.sub(r"[\s\-()]", "", text or "")
+    if digits.startswith("+91"):
+        digits = digits[3:]
+    elif len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if not MOBILE_RE.match(digits):
+        raise ValidationError("Mobile number should be 10 digits, starting with 6, 7, 8 or 9.")
+    return digits
+
+
+def find_by_mobile(db: Database, mobile: str) -> dict | None:
+    try:
+        mobile = normalize_mobile(mobile)
+    except ValidationError:
+        return None
+    row = db.one("SELECT c.*, (SELECT COUNT(*) FROM sales s WHERE s.customer_id = c.id AND s.status='COMPLETED')"
+                 " AS bills FROM customers c WHERE c.phone = ?", (mobile,))
+    return dict(row) if row else None
+
+
+def find_or_create(db: Database, name: str, mobile: str) -> int:
+    """Customer typed on the billing screen. Mobile number is the key; name alone also works.
+
+    Must run inside the sale's transaction so a failed bill never leaves a half-made customer.
+    """
+    name = (name or "").strip()
+    if len(name) > 80:
+        raise ValidationError("Customer name is too long (80 characters max).")
+    mobile = (mobile or "").strip()
+    if mobile:
+        mobile = normalize_mobile(mobile)
+        row = db.one("SELECT id, active FROM customers WHERE phone = ?", (mobile,))
+        if row:
+            if not row["active"]:
+                db.execute("UPDATE customers SET active = 1 WHERE id = ?", (row["id"],))
+            return int(row["id"])
+        return db.execute("INSERT INTO customers(name, phone, created_at) VALUES (?,?,?)",
+                          (name or f"Customer {mobile[-4:]}", mobile, now_str())).lastrowid
+    if not name:
+        return walkin_id(db)
+    row = db.one("SELECT id FROM customers WHERE name = ? COLLATE NOCASE AND phone = '' AND active = 1 "
+                 "AND is_walkin = 0 ORDER BY id LIMIT 1", (name,))
+    if row:
+        return int(row["id"])
+    return db.execute("INSERT INTO customers(name, phone, created_at) VALUES (?,?,?)",
+                      (name, "", now_str())).lastrowid
+
+
 def walkin_id(db: Database) -> int:
     return int(db.scalar("SELECT id FROM customers WHERE is_walkin = 1 ORDER BY id LIMIT 1"))
 
@@ -23,7 +78,12 @@ def _validate(name: str, phone: str) -> tuple[str, str]:
         raise ValidationError("Customer name is too long.")
     if phone and not PHONE_RE.match(phone):
         raise ValidationError("Phone number should contain only digits (6 to 16).")
-    return name, phone.replace(" ", "").replace("-", "")
+    phone = phone.replace(" ", "").replace("-", "")
+    try:
+        phone = normalize_mobile(phone) if phone else ""
+    except ValidationError:
+        pass  # landline or other number: keep as typed
+    return name, phone
 
 
 def add_customer(db: Database, name: str, phone: str = "", notes: str = "") -> int:
