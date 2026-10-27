@@ -168,7 +168,7 @@ def complete_sale(db: Database, settings: Settings, req: SaleRequest) -> int:
              (req.customer_state or "").strip()[:60]),
         ).lastrowid
 
-        for no, (ln, r) in enumerate(zip(req.lines, totals.lines), start=1):
+        for no, (ln, r) in enumerate(zip(req.lines, totals.lines, strict=True), start=1):
             db.execute(
                 "INSERT INTO sale_items(sale_id, line_no, variant_id, product_name, size, colour, sku, barcode,"
                 " hsn_code, category_name, qty, unit_price_paise, mrp_paise, unit_cost_paise, item_discount_type,"

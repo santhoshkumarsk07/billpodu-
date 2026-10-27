@@ -186,7 +186,7 @@ def compute(lines: list[CartLine], bill: BillDiscount, cfg: TaxConfig,
             f"Total discount ({fmt(t.total_discount)}) is above the allowed limit of "
             f"{fmt_percent(max_discount_bp)}% set in Settings."
         )
-    for ln, gross, ai, share in zip(lines, gross_list, after_item, shares):
+    for ln, gross, ai, share in zip(lines, gross_list, after_item, shares, strict=True):
         net = ai - share
         rate = line_rate(ln, net, cfg)
         taxable, cgst, sgst, igst, total = split_tax(net, rate, cfg.inclusive, cfg.inter_state)

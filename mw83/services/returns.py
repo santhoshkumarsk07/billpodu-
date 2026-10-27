@@ -34,7 +34,7 @@ def returnable_items(db: Database, sale_id: int) -> list[dict]:
     return out
 
 
-def _share(total: int, qty_sold: int, before: int, now: int) -> int:
+def refund_share(total: int, qty_sold: int, before: int, now: int) -> int:
     """Portion of a line amount for `now` units, given `before` units already returned.
 
     Computed cumulatively so all returns of a line add up to exactly the line amount.
@@ -82,7 +82,7 @@ def create_return(db: Database, settings: Settings, sale_id: int, lines: list[Re
                 raise ValidationError(
                     f"Cannot return {ln.qty} of {it['product_name']}: only {remaining} left to return "
                     f"(sold {it['qty']}, already returned {already}).")
-            vals = {k: _share(it[k + "_paise"], it["qty"], already, ln.qty)
+            vals = {k: refund_share(it[k + "_paise"], it["qty"], already, ln.qty)
                     for k in ("line_total", "taxable", "cgst", "sgst", "igst")}
             computed.append((ln, it, vals))
         refund_total = sum(v["line_total"] for _, _, v in computed)
